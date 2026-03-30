@@ -62,6 +62,27 @@ pub enum VoidError {
         /// The expected block size.
         block_size: usize,
     },
+
+    /// A file or directory already exists at the given path.
+    #[error("already exists: {path}")]
+    AlreadyExists {
+        /// The path that already exists.
+        path: String,
+    },
+
+    /// The directory is not empty and cannot be removed.
+    #[error("directory not empty: {path}")]
+    DirectoryNotEmpty {
+        /// The non-empty directory.
+        path: String,
+    },
+
+    /// An invalid or unsupported operation was requested.
+    #[error("invalid operation: {reason}")]
+    InvalidOperation {
+        /// Why the operation is invalid.
+        reason: String,
+    },
 }
 
 /// A convenience type alias for Results with [`VoidError`].
