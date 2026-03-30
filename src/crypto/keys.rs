@@ -31,8 +31,9 @@ pub fn derive_block_keys(
 
     // Derive the 32-byte block key
     let mut key = Zeroizing::new([0u8; KEY_SIZE]);
-    let mut key_info = Vec::with_capacity(16 + canonical_path.len() + 8);
+    let mut key_info = Vec::with_capacity(16 + 4 + canonical_path.len() + 8);
     key_info.extend_from_slice(b"voidfs-block-key");
+    key_info.extend_from_slice(&(canonical_path.len() as u32).to_le_bytes());
     key_info.extend_from_slice(canonical_path.as_bytes());
     key_info.extend_from_slice(&block_num.to_le_bytes());
     hkdf.expand(&key_info, key.as_mut())
@@ -40,8 +41,9 @@ pub fn derive_block_keys(
 
     // Derive the 24-byte block nonce
     let mut nonce = Zeroizing::new([0u8; NONCE_SIZE]);
-    let mut nonce_info = Vec::with_capacity(18 + canonical_path.len() + 8);
+    let mut nonce_info = Vec::with_capacity(18 + 4 + canonical_path.len() + 8);
     nonce_info.extend_from_slice(b"voidfs-block-nonce");
+    nonce_info.extend_from_slice(&(canonical_path.len() as u32).to_le_bytes());
     nonce_info.extend_from_slice(canonical_path.as_bytes());
     nonce_info.extend_from_slice(&block_num.to_le_bytes());
     hkdf.expand(&nonce_info, nonce.as_mut())

@@ -4,6 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use zeroize::Zeroizing;
 
 use voidfs::crypto::kdf::{derive_master_secret, KdfPreset};
 use voidfs::fs::file::{read_file, write_file};
@@ -80,8 +81,10 @@ fn main() {
             input,
             dev,
         } => {
-            let passphrase = rpassword::prompt_password("Enter passphrase: ")
-                .expect("failed to read passphrase");
+            let passphrase = Zeroizing::new(
+                rpassword::prompt_password("Enter passphrase: ")
+                    .expect("failed to read passphrase"),
+            );
 
             let data = fs::read(&input).unwrap_or_else(|e| {
                 eprintln!("Error reading {}: {e}", input.display());
@@ -114,8 +117,10 @@ fn main() {
             output,
             dev,
         } => {
-            let passphrase = rpassword::prompt_password("Enter passphrase: ")
-                .expect("failed to read passphrase");
+            let passphrase = Zeroizing::new(
+                rpassword::prompt_password("Enter passphrase: ")
+                    .expect("failed to read passphrase"),
+            );
 
             let mut img = ImageFile::open(&image).unwrap_or_else(|e| {
                 eprintln!("Error opening image: {e}");

@@ -31,8 +31,12 @@ pub fn canonical_path(path: &str) -> String {
 
 /// Compute the disk block index for a given `(path, block_num, slot)` triple.
 ///
-/// Uses `HMAC-SHA256(key=master_secret, data=path || block_num || slot)`,
+/// Uses `HMAC-SHA256(key=master_secret, data=len(path) || path || block_num || slot)`,
 /// then takes the first 8 bytes as a little-endian u64, modulo `total_blocks`.
+///
+/// The path length prefix ensures unambiguous encoding — without it, a path
+/// ending in bytes matching block_num encoding could collide with a different
+/// (path, block_num) pair.
 pub fn block_offset(
     master_secret: &[u8; 32],
     path: &str,
@@ -41,6 +45,7 @@ pub fn block_offset(
     total_blocks: u64,
 ) -> u64 {
     let mut mac = HmacSha256::new_from_slice(master_secret).expect("HMAC accepts any key length");
+    mac.update(&(path.len() as u32).to_le_bytes()); // length prefix for unambiguous encoding
     mac.update(path.as_bytes());
     mac.update(&block_num.to_le_bytes());
     mac.update(&slot.to_le_bytes());

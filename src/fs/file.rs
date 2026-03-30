@@ -25,8 +25,10 @@ fn compute_block_count(data_len: usize) -> u32 {
 
 /// Write a file to the image at the given virtual path.
 ///
-/// Creates block 0 with a [`FileHeader`] + initial data, then writes
-/// additional blocks as needed. Overwrites any existing file at the same path.
+/// Writes data blocks 1..N first, then block 0 (with the header) last.
+/// This ordering ensures that if the process crashes mid-write, the old
+/// block 0 header remains intact, pointing to the old file's data. The
+/// orphaned new blocks are harmless noise.
 pub fn write_file(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
@@ -51,16 +53,8 @@ pub fn write_file(
         accessed_at: now,
     };
 
-    // Block 0: header + first chunk of data
-    let header_bytes = header.to_bytes();
+    // Blocks 1..N first (pure data) — crash-safe ordering
     let data_in_b0 = data.len().min(DATA_IN_BLOCK0);
-    let mut payload0 = [0u8; PAYLOAD_SIZE];
-    payload0[..HEADER_SIZE].copy_from_slice(&header_bytes);
-    payload0[HEADER_SIZE..HEADER_SIZE + data_in_b0].copy_from_slice(&data[..data_in_b0]);
-
-    write_slot(image, master_secret, &canon, 0, &payload0)?;
-
-    // Blocks 1..N: pure data
     let mut offset = data_in_b0;
     for block_num in 1..block_count as u64 {
         let mut payload = [0u8; PAYLOAD_SIZE];
@@ -71,6 +65,14 @@ pub fn write_file(
         write_slot(image, master_secret, &canon, block_num, &payload)?;
         offset += chunk_len;
     }
+
+    // Block 0 last (header + first data chunk) — acts as commit marker
+    let header_bytes = header.to_bytes();
+    let mut payload0 = [0u8; PAYLOAD_SIZE];
+    payload0[..HEADER_SIZE].copy_from_slice(&header_bytes);
+    payload0[HEADER_SIZE..HEADER_SIZE + data_in_b0].copy_from_slice(&data[..data_in_b0]);
+
+    write_slot(image, master_secret, &canon, 0, &payload0)?;
 
     Ok(())
 }

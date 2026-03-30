@@ -17,6 +17,8 @@ use crate::util::errors::{VoidError, VoidResult};
 /// Tries each slot 0..MAX_SLOTS. Prefers overwriting our own slot (decrypt
 /// succeeds). Falls back to the first slot where decrypt fails (random data
 /// or another filesystem's block).
+///
+/// Always iterates ALL slots to avoid leaking which slot is used via timing.
 pub fn write_slot(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
@@ -28,26 +30,26 @@ pub fn write_slot(
     let encrypted = encrypt_block(&keys.key, &keys.nonce, plaintext)?;
 
     let total_blocks = image.total_blocks();
+    let mut own_slot: Option<u64> = None;
     let mut first_available: Option<u64> = None;
 
+    // Always iterate ALL slots (constant-time iteration count for side-channel resistance)
     for slot in 0..MAX_SLOTS {
         let offset = block_offset(master_secret, canonical_path, block_num, slot, total_blocks);
         let existing = image.read_block(offset)?;
 
-        // Try decrypting with our key — if it works, this slot is ours
         if decrypt_block(&keys.key, &keys.nonce, &existing).is_ok() {
-            image.write_block(offset, &encrypted)?;
-            return Ok(());
-        }
-
-        // This slot doesn't belong to us — remember it as a candidate
-        if first_available.is_none() {
+            // This slot belongs to us — prefer it
+            if own_slot.is_none() {
+                own_slot = Some(offset);
+            }
+        } else if first_available.is_none() {
             first_available = Some(offset);
         }
     }
 
-    // No existing slot found — use first available
-    if let Some(offset) = first_available {
+    // Prefer our own slot, then first available
+    if let Some(offset) = own_slot.or(first_available) {
         image.write_block(offset, &encrypted)?;
         Ok(())
     } else {
@@ -62,6 +64,9 @@ pub fn write_slot(
 ///
 /// Returns `Ok(Some(plaintext))` if found, `Ok(None)` if no slot decrypts
 /// successfully (file doesn't exist or wrong passphrase).
+///
+/// Always iterates ALL slots to avoid leaking data existence via timing.
+/// A wrong passphrase takes the same time as a correct one.
 pub fn read_slot(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
@@ -70,23 +75,29 @@ pub fn read_slot(
 ) -> VoidResult<Option<[u8; PAYLOAD_SIZE]>> {
     let keys = derive_block_keys(master_secret, canonical_path, block_num)?;
     let total_blocks = image.total_blocks();
+    let mut found: Option<[u8; PAYLOAD_SIZE]> = None;
 
+    // Always iterate ALL slots (constant-time iteration count for side-channel resistance)
     for slot in 0..MAX_SLOTS {
         let offset = block_offset(master_secret, canonical_path, block_num, slot, total_blocks);
         let raw = image.read_block(offset)?;
 
         if let Ok(plaintext) = decrypt_block(&keys.key, &keys.nonce, &raw) {
-            return Ok(Some(plaintext));
+            if found.is_none() {
+                found = Some(plaintext);
+            }
         }
     }
 
-    Ok(None)
+    Ok(found)
 }
 
 /// Erase a block by overwriting its slot with random data.
 ///
 /// Finds which slot contains our data and overwrites it with random bytes.
 /// Returns `true` if a block was erased, `false` if no matching slot was found.
+///
+/// Always iterates ALL slots to avoid timing leaks.
 pub fn erase_slot(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
@@ -95,20 +106,22 @@ pub fn erase_slot(
 ) -> VoidResult<bool> {
     let keys = derive_block_keys(master_secret, canonical_path, block_num)?;
     let total_blocks = image.total_blocks();
+    let mut erased = false;
 
+    // Always iterate ALL slots
     for slot in 0..MAX_SLOTS {
         let offset = block_offset(master_secret, canonical_path, block_num, slot, total_blocks);
         let raw = image.read_block(offset)?;
 
-        if decrypt_block(&keys.key, &keys.nonce, &raw).is_ok() {
+        if decrypt_block(&keys.key, &keys.nonce, &raw).is_ok() && !erased {
             let mut random_data = [0u8; crate::util::constants::BLOCK_SIZE];
             rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut random_data);
             image.write_block(offset, &random_data)?;
-            return Ok(true);
+            erased = true;
         }
     }
 
-    Ok(false)
+    Ok(erased)
 }
 
 #[cfg(test)]

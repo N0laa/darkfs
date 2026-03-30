@@ -5,6 +5,7 @@
 
 use chacha20poly1305::aead::Aead;
 use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
+use zeroize::Zeroize;
 
 use crate::util::constants::{BLOCK_SIZE, NONCE_SIZE, PAYLOAD_SIZE};
 use crate::util::errors::VoidError;
@@ -41,12 +42,13 @@ pub fn decrypt_block(
     let cipher = XChaCha20Poly1305::new(key.into());
     let xnonce = XNonce::from_slice(nonce);
 
-    let plaintext = cipher
+    let mut plaintext = cipher
         .decrypt(xnonce, ciphertext.as_ref())
         .map_err(|_| VoidError::Decrypt)?;
 
     let mut payload = [0u8; PAYLOAD_SIZE];
     payload.copy_from_slice(&plaintext);
+    plaintext.zeroize(); // wipe intermediate heap buffer
     Ok(payload)
 }
 
