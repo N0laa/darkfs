@@ -1,0 +1,47 @@
+[package]
+name = "voidfs"
+version = "0.1.0"
+edition = "2021"
+description = "A deniable steganographic filesystem. Nothing to see here."
+license = "MIT OR Apache-2.0"
+keywords = ["filesystem", "encryption", "steganography", "deniable", "fuse"]
+categories = ["filesystem", "cryptography"]
+
+[[bin]]
+name = "voidfs"
+path = "src/main.rs"
+
+[[bin]]
+name = "mkvoid"
+path = "tools/mkvoid.rs"
+
+[dependencies]
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+clap = { version = "4", features = ["derive"] }
+hkdf = "0.12"
+hmac = "0.12"
+sha2 = "0.10"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
+rand = "0.8"
+zeroize = { version = "1", features = ["derive"] }
+rpassword = "7"
+byteorder = "1"
+fuser = { version = "0.16", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1"
+
+[features]
+default = []
+fuse = ["dep:fuser"]
+
+[profile.release]
+lto = true
+strip = true
