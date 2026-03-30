@@ -150,7 +150,9 @@ fn open_image_and_derive_secret(
 }
 
 fn main() {
-    tracing_subscriber::fmt::init();
+    if std::env::var("RUST_LOG").is_ok() {
+        tracing_subscriber::fmt::init();
+    }
 
     let cli = Cli::parse();
 
@@ -171,7 +173,7 @@ fn main() {
             let handler = voidfs::fuse::handler::VoidFsHandler::new(img, *secret, uid, gid);
 
             let options = vec![
-                fuser::MountOption::FSName("voidfs".to_string()),
+                fuser::MountOption::FSName("fuse".to_string()),
                 fuser::MountOption::AutoUnmount,
             ];
             let _ = foreground; // fuser runs in foreground by default

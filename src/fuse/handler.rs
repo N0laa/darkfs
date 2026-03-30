@@ -12,6 +12,7 @@ use fuser::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty,
     ReplyEntry, ReplyOpen, ReplyStatfs, ReplyWrite, Request,
 };
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::fs::directory::FileType as VoidFileType;
 use crate::fs::file::{read_file, write_file};
@@ -26,7 +27,7 @@ const ROOT_INO: u64 = 1;
 /// The voidfs FUSE filesystem handler.
 pub struct VoidFsHandler {
     image: ImageFile,
-    master_secret: [u8; 32],
+    master_secret: Zeroizing<[u8; 32]>,
     /// inode → canonical path
     ino_to_path: HashMap<u64, String>,
     /// canonical path → inode
@@ -49,12 +50,18 @@ struct OpenFile {
     dirty: bool,
 }
 
+impl Drop for OpenFile {
+    fn drop(&mut self) {
+        self.data.zeroize();
+    }
+}
+
 impl VoidFsHandler {
     /// Create a new FUSE handler.
     pub fn new(image: ImageFile, master_secret: [u8; 32], uid: u32, gid: u32) -> Self {
         let mut handler = Self {
             image,
-            master_secret,
+            master_secret: Zeroizing::new(master_secret),
             ino_to_path: HashMap::new(),
             path_to_ino: HashMap::new(),
             next_ino: ROOT_INO + 1,
@@ -435,15 +442,18 @@ impl Filesystem for VoidFsHandler {
         if let Some(file) = self.open_files.get(&fh) {
             if file.dirty {
                 let ino = file.ino;
-                let data = file.data.clone();
+                let mut data = file.data.clone();
                 let path = match self.get_path(ino) {
                     Some(p) => p.to_string(),
                     None => {
+                        data.zeroize();
                         reply.error(libc::EIO);
                         return;
                     }
                 };
-                match write_file(&mut self.image, &self.master_secret, &path, &data) {
+                let result = write_file(&mut self.image, &self.master_secret, &path, &data);
+                data.zeroize(); // wipe the clone
+                match result {
                     Ok(()) => {
                         self.open_files.get_mut(&fh).unwrap().dirty = false;
                     }
