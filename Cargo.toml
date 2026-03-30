@@ -35,7 +35,8 @@ rand = "0.8"
 zeroize = { version = "1", features = ["derive"] }
 rpassword = "7"
 byteorder = "1"
-fuser = { version = "0.16", optional = true }
+fuser = { version = "0.16", optional = true, features = ["libfuse"] }
+libc = { version = "0.2", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
@@ -44,7 +45,7 @@ proptest = "1"
 
 [features]
 default = []
-fuse = ["dep:fuser"]
+fuse = ["dep:fuser", "dep:libc"]
 
 [profile.release]
 lto = true
