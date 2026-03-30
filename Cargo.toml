@@ -47,6 +47,10 @@ proptest = "1"
 default = []
 fuse = ["dep:fuser", "dep:libc"]
 
+[[bench]]
+name = "throughput"
+harness = false
+
 [profile.release]
 lto = true
 strip = true

@@ -203,6 +203,101 @@ fn read_file_block_count(
     }
 }
 
+/// Summary statistics about a filesystem visible under a given passphrase.
+#[derive(Debug, Default)]
+pub struct FsInfo {
+    /// Total number of files found.
+    pub file_count: u64,
+    /// Total number of directories found (excluding root).
+    pub dir_count: u64,
+    /// Total bytes stored across all files.
+    pub total_bytes: u64,
+    /// Total blocks used by file data (not counting dirindex overhead).
+    pub total_blocks_used: u64,
+}
+
+/// Walk the filesystem tree and gather statistics.
+pub fn fs_info(image: &mut ImageFile, master_secret: &[u8; 32]) -> VoidResult<FsInfo> {
+    let mut info = FsInfo::default();
+    walk_dir_for_info(image, master_secret, "/", &mut info)?;
+    Ok(info)
+}
+
+fn walk_dir_for_info(
+    image: &mut ImageFile,
+    master_secret: &[u8; 32],
+    dir: &str,
+    info: &mut FsInfo,
+) -> VoidResult<()> {
+    let dir_idx = read_dirindex(image, master_secret, dir)?;
+
+    for entry in &dir_idx.entries {
+        let child_path = if dir == "/" {
+            format!("/{}", entry.name)
+        } else {
+            format!("{dir}/{}", entry.name)
+        };
+
+        match entry.entry_type {
+            FileType::File => {
+                info.file_count += 1;
+                if let Some(header) = stat(image, master_secret, &child_path)? {
+                    info.total_bytes += header.file_size;
+                    info.total_blocks_used += header.block_count as u64;
+                }
+            }
+            FileType::Directory => {
+                info.dir_count += 1;
+                walk_dir_for_info(image, master_secret, &child_path, info)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Walk the filesystem tree and collect all paths for display.
+pub fn tree(
+    image: &mut ImageFile,
+    master_secret: &[u8; 32],
+) -> VoidResult<Vec<(String, FileType, u64)>> {
+    let mut entries = Vec::new();
+    walk_dir_for_tree(image, master_secret, "/", &mut entries)?;
+    Ok(entries)
+}
+
+fn walk_dir_for_tree(
+    image: &mut ImageFile,
+    master_secret: &[u8; 32],
+    dir: &str,
+    entries: &mut Vec<(String, FileType, u64)>,
+) -> VoidResult<()> {
+    let dir_idx = read_dirindex(image, master_secret, dir)?;
+
+    for entry in &dir_idx.entries {
+        let child_path = if dir == "/" {
+            format!("/{}", entry.name)
+        } else {
+            format!("{dir}/{}", entry.name)
+        };
+
+        match entry.entry_type {
+            FileType::File => {
+                let size = stat(image, master_secret, &child_path)?
+                    .map(|h| h.file_size)
+                    .unwrap_or(0);
+                entries.push((child_path, FileType::File, size));
+            }
+            FileType::Directory => {
+                entries.push((child_path.clone(), FileType::Directory, 0));
+                walk_dir_for_tree(image, master_secret, &child_path, entries)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Recursively delete a directory and all its contents.
 pub fn rmdir_recursive(
     image: &mut ImageFile,

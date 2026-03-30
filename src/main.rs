@@ -7,7 +7,8 @@ use clap::{Parser, Subcommand};
 use zeroize::Zeroizing;
 
 use voidfs::crypto::kdf::{derive_master_secret, KdfPreset};
-use voidfs::fs::file::{read_file, write_file};
+use voidfs::fs::file::read_file;
+use voidfs::fs::ops::create_file;
 use voidfs::store::image::ImageFile;
 
 #[derive(Parser)]
@@ -66,6 +67,17 @@ enum Command {
         dev: bool,
     },
 
+    /// Show filesystem info (requires correct passphrase)
+    Info {
+        /// Path to the void image
+        #[arg(long)]
+        image: PathBuf,
+
+        /// Use fast (dev) KDF parameters
+        #[arg(long)]
+        dev: bool,
+    },
+
     /// Read a file from the void image (without FUSE)
     Read {
         /// Path to the void image
@@ -103,6 +115,21 @@ fn prompt_passphrase() -> Zeroizing<String> {
     Zeroizing::new(
         rpassword::prompt_password("Enter passphrase: ").expect("failed to read passphrase"),
     )
+}
+
+fn format_size(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = 1024 * 1024;
+    const GIB: u64 = 1024 * 1024 * 1024;
+    if bytes >= GIB {
+        format!("{:.1} GiB", bytes as f64 / GIB as f64)
+    } else if bytes >= MIB {
+        format!("{:.1} MiB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.1} KiB", bytes as f64 / KIB as f64)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 fn open_image_and_derive_secret(
@@ -175,6 +202,51 @@ fn main() {
             }
         }
 
+        Command::Info { image, dev } => {
+            let passphrase = prompt_passphrase();
+            let (mut img, secret) =
+                open_image_and_derive_secret(&image, passphrase.as_bytes(), get_preset(dev));
+
+            let total_blocks = img.total_blocks();
+            let image_size = total_blocks * voidfs::util::constants::BLOCK_SIZE as u64;
+
+            let info = voidfs::fs::ops::fs_info(&mut img, &secret).unwrap_or_else(|e| {
+                eprintln!("Error reading filesystem: {e}");
+                std::process::exit(1);
+            });
+
+            println!("voidfs image: {}", image.display());
+            println!(
+                "  Image size:    {} ({} blocks)",
+                format_size(image_size),
+                total_blocks
+            );
+            println!("  Files:         {}", info.file_count);
+            println!("  Directories:   {}", info.dir_count);
+            println!("  Data stored:   {}", format_size(info.total_bytes));
+            println!(
+                "  Blocks used:   {} ({:.1}%)",
+                info.total_blocks_used,
+                info.total_blocks_used as f64 / total_blocks as f64 * 100.0
+            );
+
+            if info.file_count > 0 || info.dir_count > 0 {
+                println!();
+                let entries = voidfs::fs::ops::tree(&mut img, &secret).unwrap_or_default();
+                for (path, entry_type, size) in &entries {
+                    let marker = match entry_type {
+                        voidfs::fs::directory::FileType::Directory => "/",
+                        voidfs::fs::directory::FileType::File => "",
+                    };
+                    if *entry_type == voidfs::fs::directory::FileType::File {
+                        println!("  {path}{marker}  ({})", format_size(*size));
+                    } else {
+                        println!("  {path}{marker}");
+                    }
+                }
+            }
+        }
+
         Command::Write {
             image,
             file,
@@ -189,7 +261,7 @@ fn main() {
             let (mut img, secret) =
                 open_image_and_derive_secret(&image, passphrase.as_bytes(), get_preset(dev));
 
-            write_file(&mut img, &secret, &file, &data).unwrap_or_else(|e| {
+            create_file(&mut img, &secret, &file, &data).unwrap_or_else(|e| {
                 eprintln!("Write error: {e}");
                 std::process::exit(1);
             });
