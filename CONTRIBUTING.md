@@ -59,13 +59,13 @@ Every PR should pass:
 
 ```bash
 cargo test                    # Unit + integration tests
-cargo test --test pentest_round2  # Security pentest suite
+cargo test --test pentest  # Security pentest suite
 cargo clippy                  # Lints
 ```
 
 ### Writing Security Tests
 
-Security-sensitive changes should include adversarial tests in `tests/pentest_round2.rs`. Each test should document:
+Security-sensitive changes should include adversarial tests in `tests/pentest.rs`. Each test should document:
 1. Severity (CRITICAL / HIGH / MEDIUM / LOW / INFO)
 2. Attack scenario
 3. What the test proves

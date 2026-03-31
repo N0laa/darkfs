@@ -164,7 +164,7 @@ Full-source adversarial audit covering cryptographic analysis, deniability attac
 
 **Impact**: Silent data loss for any multi-block file after image reopen + new file write.
 
-**PoC**: `tests/pentest_round2.rs::critical_claim_file_blocks_never_claims_multiblock`
+**PoC**: `tests/pentest.rs::critical_claim_file_blocks_never_claims_multiblock`
 
 **Fix**: In `ops.rs:390`, replace:
 ```rust

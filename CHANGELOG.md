@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Full deep security audit with 15 adversarial PoC tests
 
 ### Added
-- `tests/pentest_round2.rs` — deep audit pentest suite
+- `tests/pentest.rs` — deep audit pentest suite
 - `SECURITY.md` — comprehensive security audit documentation
 - `CONTRIBUTING.md`
 - `CHANGELOG.md`
