@@ -58,8 +58,7 @@ pub fn tier_block_count(actual_blocks: u32) -> u64 {
 
 /// Maximum number of entries in a single-block superblock slot map.
 ///
-/// Each entry is 9 bytes (8-byte path hash + 1-byte slot index).
-/// Payload budget: PAYLOAD_SIZE - 4 (magic) - 1 (version) - 3 (reserved)
-///   - 32 (salt) - 8 (generation) - 4 (file_count) - 8 (slot_map len header) - 32 (integrity)
-///   = 4056 - 92 = 3964 bytes → 3964 / 9 = 440 entries.
-pub const SUPERBLOCK_MAX_ENTRIES: usize = 440;
+/// Each entry is 13 bytes (8-byte path hash + 4-byte block_num + 1-byte slot index).
+/// Payload budget: PAYLOAD_SIZE - 52 (header) - 4 (entry_count) - 32 (integrity)
+///   = 4056 - 88 = 3968 bytes → 3968 / 13 = 305 entries.
+pub const SUPERBLOCK_MAX_ENTRIES: usize = 305;

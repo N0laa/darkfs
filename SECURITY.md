@@ -1,7 +1,7 @@
 # voidfs Security Audit
 
-Full 8-step audit completed 2026-03-31.
-Scope: crypto primitives, deniability, collision integrity, side channels, adversarial attacks, build hardening, final penetration test.
+Rounds 1–3 completed 2026-03-31. Round 4 pentest completed 2026-03-31.
+Scope: crypto primitives, deniability, collision integrity, side channels, adversarial attacks, build hardening, penetration testing.
 
 ## Findings Summary
 
@@ -9,7 +9,7 @@ Scope: crypto primitives, deniability, collision integrity, side channels, adver
 
 | # | Finding | Rating | Status |
 |---|---------|--------|--------|
-| C1 | Nonce reuse on file overwrite — same (key,nonce) encrypts different plaintext | CRITICAL | By design — documented below |
+| C1 | ~~Nonce reuse on file overwrite~~ | ~~CRITICAL~~ | **FIXED** — random nonce per write |
 | C2 | Nonce/key derivation is collision-free (length-prefixed HKDF info) | OK | Verified |
 | C3 | Key separation is correct (distinct paths/blocks produce distinct keys) | OK | Verified |
 | C4 | Deterministic salt enables precomputation for common image sizes | MEDIUM | By design — documented |
@@ -26,13 +26,13 @@ Scope: crypto primitives, deniability, collision integrity, side channels, adver
 | D4 | Process name "voidfs" visible in ps/mount | HIGH | **FIXED** — FSName now configurable |
 | D5 | VOIDFS_PASSPHRASE env var visible in /proc | HIGH | Cleared after read; documented |
 | D6 | Argon2id 256 MiB allocation is a behavioral signal | LOW | Inherent |
-| D7 | Wrong passphrase: all 5 slots always iterated — timing leak eliminated | OK | **FIXED** |
+| D7 | Wrong passphrase: all 16 slots always iterated — timing leak eliminated | OK | **FIXED** |
 
 ### Collision & Integrity (Step 3)
 
 | # | Finding | Rating | Status |
 |---|---------|--------|--------|
-| I1 | System unreliable above ~40% fill; no warning | HIGH | Documented |
+| I1 | System unreliable above ~50% fill with MAX_SLOTS=16 | MEDIUM | Documented |
 | I2 | Cross-passphrase block overwrites cause silent data loss | HIGH | Inherent to deniability |
 | I3 | Crash-safe write ordering (block 0 last) | OK | **FIXED** |
 | I4 | Crash during dirindex write can orphan files | MEDIUM | Documented |
@@ -49,7 +49,7 @@ Scope: crypto primitives, deniability, collision integrity, side channels, adver
 | S3 | flush() clones data without zeroizing clone | MEDIUM | **FIXED** |
 | S4 | Passphrase in main.rs properly Zeroizing<String> | OK | Verified |
 | S5 | Decrypted plaintext Vec zeroized in cipher.rs | OK | **FIXED** (Phase 1 audit) |
-| S6 | Slot iteration constant-count (all 5 always) | OK | **FIXED** (Phase 1 audit) |
+| S6 | Slot iteration constant-count (all 16 always) | OK | **FIXED** (Phase 1 audit) |
 | S7 | Poly1305 tag comparison is constant-time (subtle crate) | OK | Verified |
 | S8 | No mlock() — secrets can be swapped to disk | MEDIUM | Future fix |
 | S9 | No core dump prevention | MEDIUM | Future fix |
@@ -61,7 +61,7 @@ Scope: crypto primitives, deniability, collision integrity, side channels, adver
 | Header scan | **FAILS** | No unencrypted structures on disk |
 | Entropy analysis (NIST STS) | **FAILS** | Ciphertext is IND-CPA; passes all tests |
 | Block pattern analysis | **FAILS** | Cannot distinguish encrypted from random blocks |
-| Snapshot diff | **PARTIAL** | Reveals activity volume but not content or filesystem attribution |
+| Snapshot diff | **PARTIAL** | Reveals activity volume; superblock hidden by decoy writes |
 | Memory forensics | **SUCCEEDS** | Master secret + path table + file buffers in RAM — **FIXED** (zeroize) |
 | Known-plaintext | **FAILS** | Per-block HKDF keys; no KPA weakness in XChaCha20 |
 | Birthday/HMAC brute-force | **FAILS** | Argon2id makes brute-force infeasible for strong passphrases |
@@ -99,23 +99,38 @@ Two 64MB images tested blind (one voidfs with 3 files, one pure /dev/urandom):
 
 ---
 
-## Critical Finding: Nonce Reuse on Overwrite (C1)
+## Historical Finding: Nonce Reuse on Overwrite (C1) — FIXED
 
-**Rating: CRITICAL (if multi-snapshot attacker is in scope)**
+**Originally rated CRITICAL**, this was fixed by switching to random 24-byte nonces per write (see `cipher.rs`). Every block write generates a fresh random nonce, stored as the first 24 bytes of the on-disk block. Nonce collision probability at 2^48 writes is ~2^-97.
 
-When a file is overwritten at the same path, the same (key, nonce) encrypts different plaintext. XChaCha20 is a stream cipher, so:
-- `C1 XOR C2 = P1 XOR P2` — attacker recovers XOR of plaintexts
-- Known-plaintext (e.g., FileHeader magic in block 0) recovers the keystream
-- Poly1305 key reuse breaks authentication — forgeries possible
+## Pentest Round 4 Findings
 
-**Threat model scope**: This is only exploitable if the attacker has two snapshots of the same disk block (before and after overwrite). Sources: backups, VM snapshots, SSD wear-leveling, copy-on-write filesystems.
+Full automated pentest with 25+ attacks across 7 categories. All findings below have been fixed.
 
-**Mitigations** (tradeoffs with deniability):
-1. **SIV mode**: Use a nonce-misuse-resistant AEAD (e.g., AES-GCM-SIV). Nonce reuse only leaks whether plaintexts are identical, not their XOR. However, no XChaCha20-SIV exists in RustCrypto.
-2. **Random nonce component**: Store a random value in the block — but this is detectable metadata.
-3. **Document as known limitation**: If the threat model assumes single-snapshot, this is unexploitable.
+| # | Finding | Severity | Status |
+|---|---------|----------|--------|
+| P1 | Stale blocks after size-reducing overwrite — old excess blocks not erased | HIGH | **FIXED** — `write_file` Phase 4 erases blocks `new_count..old_count` |
+| P2 | Superblock serialization panic on >305 slot entries (buffer overflow) | HIGH | **FIXED** — bounds check returns `SuperblockFull` error |
+| P2b | Stale `SUPERBLOCK_MAX_ENTRIES` constant (440 vs actual 305) | HIGH | **FIXED** — updated to 305 |
+| P3 | Snapshot diff reveals superblock location (only block changing every write) | MEDIUM | **FIXED** — 7 deterministic decoy writes per superblock update |
+| P4 | Write I/O count reveals exact file size (no write-side padding) | MEDIUM | **FIXED** — dummy writes pad to tier boundaries (1/16/256/4096) |
+| P5 | `create_file("/")` panics via `assert!` in `filename_of` | LOW | **FIXED** — `filename_of` returns `Option`, callers return errors |
+| P6 | Superblock is single point of failure (corrupt 1 block → total data loss) | MEDIUM | Known limitation — inherent to deniable design; documented |
 
-**Current status**: Documented as a known design tradeoff. The threat model assumes single-snapshot analysis.
+### Attacks that failed (system is secure)
+
+- HKDF salt==IKM distinguisher: chi-square 284.6, no bias
+- XChaCha20 nonce birthday: collision at 2^48 writes is 2^-97
+- Argon2id timing vs passphrase length: constant time
+- Directory cycle stack overflow: path canonicalization prevents true cycles
+- Deletion residue: erased blocks no longer decrypt
+- Dual passphrase corruption: 0/100 files corrupted
+- Statistical distinguishability (used vs fresh): identical chi-square, entropy, serial correlation
+- Bincode deserialization OOM: rejects malformed data safely
+- flock bypass: second open correctly returns ImageLocked
+- Modular bias (u64 % total_blocks): ~1.4×10⁻¹³, negligible
+- 500-file roundtrip integrity: all files byte-perfect
+- 5000 create/delete cycles: no slot leaks or degradation
 
 ## Deniability Verdict
 
@@ -123,7 +138,7 @@ When a file is overwritten at the same path, the same (key, nonce) encrypts diff
 
 **Under observation: PARTIAL** — Behavioral fingerprints exist (I/O patterns, memory allocation, process/mount names). All require active monitoring of the running system.
 
-**Multi-snapshot: WEAK** — Nonce reuse on overwrite breaks confidentiality for changed blocks. Snapshot diffs reveal activity volume.
+**Multi-snapshot: IMPROVED** — Random nonces prevent confidentiality breaks. Decoy writes mask superblock location. Write padding hides exact file sizes (observer learns only tier: 1/16/256/4096 blocks).
 
 ## Threat Model
 

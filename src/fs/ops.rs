@@ -41,8 +41,15 @@ pub fn create_file(
     data: &[u8],
 ) -> VoidResult<()> {
     let canon = canonical_path(path);
+    if canon == "/" {
+        return Err(VoidError::InvalidOperation {
+            reason: "cannot create file at root path".to_string(),
+        });
+    }
     let parent = parent_of(&canon);
-    let name = filename_of(&canon);
+    let name = filename_of(&canon).ok_or_else(|| VoidError::InvalidOperation {
+        reason: "cannot create file at root path".to_string(),
+    })?;
     reject_reserved(name)?;
 
     // Write the file data
@@ -72,8 +79,13 @@ pub fn read_file_data(
 /// Delete a file: overwrite its blocks with random data and remove from parent index.
 pub fn delete_file(image: &mut ImageFile, master_secret: &[u8; 32], path: &str) -> VoidResult<()> {
     let canon = canonical_path(path);
+    if canon == "/" {
+        return Err(VoidError::InvalidOperation {
+            reason: "cannot delete root".to_string(),
+        });
+    }
     let parent = parent_of(&canon);
-    let name = filename_of(&canon);
+    let name = filename_of(&canon).ok_or(VoidError::FileNotFound)?;
 
     // Read the file header to find block count
     let block_count = match read_file_block_count(image, master_secret, &canon)? {
@@ -107,7 +119,9 @@ pub fn mkdir(image: &mut ImageFile, master_secret: &[u8; 32], path: &str) -> Voi
     }
 
     let parent = parent_of(&canon);
-    let name = filename_of(&canon);
+    let name = filename_of(&canon).ok_or_else(|| VoidError::InvalidOperation {
+        reason: "cannot create directory at root path".to_string(),
+    })?;
     reject_reserved(name)?;
 
     // Check if already exists in parent
@@ -141,7 +155,9 @@ pub fn rmdir(image: &mut ImageFile, master_secret: &[u8; 32], path: &str) -> Voi
     }
 
     let parent = parent_of(&canon);
-    let name = filename_of(&canon);
+    let name = filename_of(&canon).ok_or_else(|| VoidError::InvalidOperation {
+        reason: "cannot remove root directory".to_string(),
+    })?;
 
     // Check that directory exists and is empty
     let dir_idx = read_dirindex(image, master_secret, &canon)?;
@@ -425,7 +441,10 @@ pub fn rmdir_recursive(
     // Remove from parent (unless root)
     if canon != "/" {
         let parent = parent_of(&canon);
-        let name = filename_of(&canon);
+        let name = match filename_of(&canon) {
+            Some(n) => n,
+            None => return Ok(()), // root — nothing to remove from parent
+        };
         let mut parent_idx = read_dirindex(image, master_secret, parent)?;
         parent_idx.remove(name);
         write_dirindex(image, master_secret, parent, &parent_idx)?;

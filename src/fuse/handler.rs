@@ -281,7 +281,14 @@ impl Filesystem for VoidFsHandler {
 
         // Check parent dirindex to determine type
         let parent = parent_of(&path).to_string();
-        let name = filename_of(&path).to_string();
+        let name = match filename_of(&path) {
+            Some(n) => n.to_string(),
+            None => {
+                // Root path — treat as directory
+                reply.attr(&TTL, &self.make_dir_attr(ino));
+                return;
+            }
+        };
 
         let dir_idx = match list_dir(&mut self.image, &self.session_secret, &parent) {
             Ok(idx) => idx,

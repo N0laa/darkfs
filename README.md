@@ -20,20 +20,24 @@ The only secret is a passphrase in your head. Everything else -- block locations
 # Build
 cargo build --features fuse --release
 
-# Create a 2 GiB void image (filled with random data)
-mkvoid --size 2G --output vault.img
+# Create a 2 GiB vault (filled with random data)
+voidfs create vault.img 2G
 
-# Mount with passphrase
-voidfs mount vault.img ~/private --dev    # --dev for fast KDF during development
-Enter passphrase: ████████████
+# Store a file (enter passphrase when prompted)
+voidfs put vault.img secret.pdf
 
-# Use like any normal directory
-cp secret.pdf ~/private/
+# Retrieve a file
+voidfs get vault.img secret.pdf .
+
+# List files
+voidfs ls vault.img
+
+# Or mount with FUSE (requires --features fuse)
+voidfs mount vault.img ~/private
+cp document.pdf ~/private/
 ls ~/private/
-cat ~/private/secret.pdf
-
-# Unmount
 umount ~/private
+
 # vault.img is now indistinguishable from random noise
 ```
 
@@ -57,18 +61,17 @@ cargo build --release
 
 ## Commands
 
-### `mkvoid` -- Create a void image
+### `voidfs create` -- Create a vault
 
 ```bash
-mkvoid --size 64M --output vault.img
-mkvoid --size 2G --output vault.img
+voidfs create vault.img 500M
+voidfs create vault.img 2G
 ```
 
 ### `voidfs mount` -- Mount as FUSE filesystem
 
 ```bash
 voidfs mount vault.img ~/private
-voidfs mount vault.img ~/private --dev    # fast KDF for development
 ```
 
 ### `voidfs unmount` -- Unmount
@@ -78,22 +81,28 @@ voidfs unmount ~/private
 # or: umount ~/private
 ```
 
-### `voidfs info` -- Show filesystem info
+### `voidfs info` -- Show vault info
 
 ```bash
-voidfs info --image vault.img --dev
+voidfs info vault.img
 ```
 
 Requires the correct passphrase. Shows file count, directory count, data stored, and a file listing.
 
-### `voidfs write` / `voidfs read` -- Direct image access
+### `voidfs put` / `voidfs get` -- Direct vault access
 
 ```bash
-# Write a file without mounting
-voidfs write --image vault.img --file /secret.txt --input data.txt --dev
+# Store a file without mounting
+voidfs put vault.img secret.txt
 
-# Read a file without mounting
-voidfs read --image vault.img --file /secret.txt --output recovered.txt --dev
+# Retrieve a file without mounting
+voidfs get vault.img secret.txt .
+
+# List files
+voidfs ls vault.img
+
+# Delete a file
+voidfs rm vault.img secret.txt
 ```
 
 ## Multiple Passphrases (Deniability)
@@ -125,7 +134,7 @@ umount ~/private
 ### What voidfs does NOT protect against
 
 - **Active surveillance**: An attacker watching your system while voidfs is running can observe I/O patterns, memory allocation (Argon2id uses 256 MiB), and the process name.
-- **Multi-snapshot analysis**: An attacker comparing two copies of the image can see which blocks changed, revealing approximate file sizes.
+- **Multi-snapshot analysis**: An attacker comparing two copies of the image can see which blocks changed. Decoy writes and tier-based I/O padding limit what is revealed, but approximate file size (within tier boundaries) is still observable.
 - **Weak passphrases**: Use 12+ characters with high entropy. The deterministic salt (derived from image size) means dictionary attacks are amortized across all users with the same image size.
 - **Rubber-hose cryptanalysis**: voidfs provides plausible deniability, not resistance to physical coercion.
 
@@ -164,7 +173,7 @@ Benchmarks on Apple M-series (release build):
 
 - **Rename is O(file_size)**: Block locations are derived from file paths, so renaming requires re-encrypting all blocks. Currently not implemented (returns ENOSYS).
 - **No journaling**: A crash during write can leave files in an inconsistent state. Block 0 is written last as a basic commit marker.
-- **Collision risk**: At >50% image utilization, hash collisions become likely. Keep usage below 30-40% for safety.
+- **Collision risk**: With 16-slot cuckoo hashing, practical fill rate is ~50-60%. Keep usage below 50% for safety.
 - **No file locking**: Concurrent access to the same image will corrupt data.
 - **macOS extended attributes**: Finder creates `._*` files on non-HFS filesystems. These are harmless encrypted data but consume blocks.
 

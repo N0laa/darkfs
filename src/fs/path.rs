@@ -24,21 +24,22 @@ pub fn parent_of(canonical: &str) -> &str {
 
 /// Return the filename (last component) of a canonical path.
 ///
+/// Returns `None` if called on `"/"` (root has no filename).
+///
 /// ```
 /// # use voidfs::fs::path::filename_of;
-/// assert_eq!(filename_of("/foo"), "foo");
-/// assert_eq!(filename_of("/foo/bar.txt"), "bar.txt");
-/// assert_eq!(filename_of("/a/b/c"), "c");
+/// assert_eq!(filename_of("/foo"), Some("foo"));
+/// assert_eq!(filename_of("/foo/bar.txt"), Some("bar.txt"));
+/// assert_eq!(filename_of("/a/b/c"), Some("c"));
+/// assert_eq!(filename_of("/"), None);
 /// ```
-///
-/// # Panics
-///
-/// Panics if called on `"/"` (root has no filename).
-pub fn filename_of(canonical: &str) -> &str {
-    assert!(canonical != "/", "root has no filename");
+pub fn filename_of(canonical: &str) -> Option<&str> {
+    if canonical == "/" {
+        return None;
+    }
     match canonical.rfind('/') {
-        Some(pos) => &canonical[pos + 1..],
-        None => canonical,
+        Some(pos) => Some(&canonical[pos + 1..]),
+        None => Some(canonical),
     }
 }
 
@@ -95,13 +96,18 @@ mod tests {
     }
 
     #[test]
+    fn filename_of_root() {
+        assert_eq!(filename_of("/"), None);
+    }
+
+    #[test]
     fn filename_of_top_level() {
-        assert_eq!(filename_of("/foo"), "foo");
+        assert_eq!(filename_of("/foo"), Some("foo"));
     }
 
     #[test]
     fn filename_of_nested() {
-        assert_eq!(filename_of("/foo/bar.txt"), "bar.txt");
+        assert_eq!(filename_of("/foo/bar.txt"), Some("bar.txt"));
     }
 
     #[test]

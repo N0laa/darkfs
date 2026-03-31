@@ -149,6 +149,12 @@ fn serialize_superblock(
     master_secret: &[u8; 32],
     sb: &Superblock,
 ) -> Result<[u8; PAYLOAD_SIZE], VoidError> {
+    if sb.slot_map.len() > MAX_SLOT_ENTRIES {
+        return Err(VoidError::SuperblockFull {
+            max_entries: MAX_SLOT_ENTRIES,
+        });
+    }
+
     let mut buf = [0u8; PAYLOAD_SIZE];
     let mut pos = 0;
 
@@ -284,7 +290,41 @@ pub fn read_superblock(
     }
 }
 
-/// Encrypt and write the superblock to the image.
+/// Number of deterministic decoy blocks written alongside each superblock update.
+const DECOY_WRITE_COUNT: usize = 7;
+
+/// Compute deterministic decoy offsets derived from master_secret.
+///
+/// These are fixed per-image so that the SAME set of blocks changes on every
+/// superblock write. An adversary diffing snapshots sees `1 + DECOY_WRITE_COUNT`
+/// blocks that change every time — they cannot distinguish the superblock from
+/// the decoys without the passphrase.
+fn decoy_offsets(master_secret: &[u8; 32], total_blocks: u64) -> Vec<u64> {
+    let sb_off = superblock_offset(master_secret, total_blocks);
+    let mut offsets = Vec::with_capacity(DECOY_WRITE_COUNT);
+    for i in 0u32..DECOY_WRITE_COUNT as u32 * 4 {
+        if offsets.len() >= DECOY_WRITE_COUNT {
+            break;
+        }
+        let mut mac = HmacSha256::new_from_slice(master_secret)
+            .expect("HMAC accepts any key length");
+        mac.update(b"voidfs-decoy");
+        mac.update(&i.to_le_bytes());
+        let result = mac.finalize().into_bytes();
+        let hash_bytes: [u8; 8] = result[..8].try_into().expect("8 bytes");
+        let off = u64::from_le_bytes(hash_bytes) % total_blocks;
+        if off != sb_off && !offsets.contains(&off) {
+            offsets.push(off);
+        }
+    }
+    offsets
+}
+
+/// Encrypt and write the superblock to the image, plus deterministic decoy blocks.
+///
+/// Writes `DECOY_WRITE_COUNT` random-data blocks to deterministic offsets
+/// derived from `master_secret`, so that snapshot diffs see multiple blocks
+/// changing every time and cannot identify which one is the superblock.
 pub fn write_superblock(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
@@ -296,6 +336,19 @@ pub fn write_superblock(
     let encrypted = encrypt_block(&key, &payload)?;
     image.write_block(offset, &encrypted)?;
     image.claim_offset(offset);
+
+    // Write decoy blocks at deterministic (but secret) offsets.
+    let total = image.total_blocks();
+    let decoys = decoy_offsets(master_secret, total);
+    let mut rng = rand::thread_rng();
+    for idx in decoys {
+        if !image.is_offset_claimed(idx) {
+            let mut noise = [0u8; crate::util::constants::BLOCK_SIZE];
+            rand::RngCore::fill_bytes(&mut rng, &mut noise);
+            let _ = image.write_block(idx, &noise);
+        }
+    }
+
     Ok(())
 }
 

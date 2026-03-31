@@ -11,7 +11,7 @@ use zeroize::Zeroizing;
 use crate::crypto::locator::canonical_path;
 use crate::fs::inode::FileHeader;
 use crate::store::image::ImageFile;
-use crate::store::slots::{erase_slot_at, read_slot, write_slot_cow};
+use crate::store::slots::{erase_slot, erase_slot_at, read_slot, write_slot_cow};
 use crate::util::constants::{tier_block_count, DATA_IN_BLOCK0, DATA_IN_BLOCKN, HEADER_SIZE, PAYLOAD_SIZE};
 use crate::util::errors::{VoidError, VoidResult};
 
@@ -53,6 +53,10 @@ pub fn write_file(
 ) -> VoidResult<()> {
     let canon = canonical_path(path);
     let block_count = compute_block_count(data.len())?;
+
+    // Read the OLD block count before overwriting, so we can erase stale blocks
+    // if the new file is smaller than the old one.
+    let old_block_count = read_block_count_from_header(image, master_secret, &canon)?;
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -97,12 +101,61 @@ pub fn write_file(
         old_offsets.push(old_off);
     }
 
-    // Phase 3: Erase old slots (cleanup — failure here is harmless)
+    // Phase 3: Erase old COW slots (cleanup — failure here is harmless)
     for old_off in old_offsets {
         let _ = erase_slot_at(image, old_off);
     }
 
+    // Phase 4: Erase stale blocks if the new file is smaller than the old one.
+    // Without this, blocks from the old (larger) file remain decryptable on disk,
+    // breaking forward secrecy on size-reducing overwrites.
+    if let Some(old_count) = old_block_count {
+        for block_num in block_count as u64..old_count as u64 {
+            let _ = erase_slot(image, master_secret, &canon, block_num);
+        }
+    }
+
+    // Phase 5: Pad writes with dummy random-block writes to the same tier
+    // boundaries used by reads. This prevents an I/O-level observer from
+    // determining the exact file size from the number of blocks written.
+    let padded = tier_block_count(block_count);
+    let total = image.total_blocks();
+    if padded > block_count as u64 && total > 1 {
+        let dummy_count = padded - block_count as u64;
+        let mut rng = rand::thread_rng();
+        for _ in 0..dummy_count {
+            let idx = rand::Rng::gen_range(&mut rng, 0..total);
+            if !image.is_offset_claimed(idx) {
+                let mut noise = [0u8; crate::util::constants::BLOCK_SIZE];
+                rand::RngCore::fill_bytes(&mut rng, &mut noise);
+                let _ = image.write_block(idx, &noise);
+            }
+        }
+    }
+
     Ok(())
+}
+
+/// Read just the block count from a file's block-0 header, without reading all data.
+///
+/// Returns `Ok(None)` if the file doesn't exist (no block 0 decrypts).
+fn read_block_count_from_header(
+    image: &mut ImageFile,
+    master_secret: &[u8; 32],
+    canonical: &str,
+) -> VoidResult<Option<u32>> {
+    let payload0 = match read_slot(image, master_secret, canonical, 0)? {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+    let header_bytes: [u8; HEADER_SIZE] = payload0[..HEADER_SIZE]
+        .try_into()
+        .expect("slice is HEADER_SIZE");
+    match FileHeader::from_bytes(&header_bytes) {
+        Ok(h) => Ok(Some(h.block_count)),
+        Err(VoidError::InvalidMagic) => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// Read a file from the image at the given virtual path.
