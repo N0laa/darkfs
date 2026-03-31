@@ -4,7 +4,7 @@ use tempfile::NamedTempFile;
 
 use voidfs::crypto::cipher::{decrypt_block, encrypt_block};
 use voidfs::crypto::kdf::{derive_master_secret, KdfPreset};
-use voidfs::crypto::keys::derive_block_keys;
+use voidfs::crypto::keys::derive_block_key;
 use voidfs::crypto::locator::{block_offset, canonical_path};
 use voidfs::fs::file::{read_file, write_file};
 use voidfs::store::image::ImageFile;
@@ -35,7 +35,6 @@ fn bench_kdf(c: &mut Criterion) {
 
 fn bench_encrypt_decrypt(c: &mut Criterion) {
     let key = [42u8; 32];
-    let nonce = [7u8; 24];
     let mut plaintext = [0u8; PAYLOAD_SIZE];
     rand::thread_rng().fill_bytes(&mut plaintext);
 
@@ -43,12 +42,12 @@ fn bench_encrypt_decrypt(c: &mut Criterion) {
     group.throughput(Throughput::Bytes(PAYLOAD_SIZE as u64));
 
     group.bench_function("encrypt", |b| {
-        b.iter(|| encrypt_block(black_box(&key), black_box(&nonce), black_box(&plaintext)))
+        b.iter(|| encrypt_block(black_box(&key), black_box(&plaintext)))
     });
 
-    let encrypted = encrypt_block(&key, &nonce, &plaintext).unwrap();
+    let encrypted = encrypt_block(&key, &plaintext).unwrap();
     group.bench_function("decrypt", |b| {
-        b.iter(|| decrypt_block(black_box(&key), black_box(&nonce), black_box(&encrypted)))
+        b.iter(|| decrypt_block(black_box(&key), black_box(&encrypted)))
     });
 
     group.finish();
@@ -56,9 +55,9 @@ fn bench_encrypt_decrypt(c: &mut Criterion) {
 
 fn bench_key_derivation(c: &mut Criterion) {
     let secret = [42u8; 32];
-    c.bench_function("hkdf_block_keys", |b| {
+    c.bench_function("hkdf_block_key", |b| {
         b.iter(|| {
-            derive_block_keys(
+            derive_block_key(
                 black_box(&secret),
                 black_box("/bench/file.txt"),
                 black_box(0),

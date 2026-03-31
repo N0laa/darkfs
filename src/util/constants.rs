@@ -6,8 +6,9 @@ pub const BLOCK_SIZE: usize = 4096;
 /// Size of the Poly1305 authentication tag, in bytes.
 pub const TAG_SIZE: usize = 16;
 
-/// Size of the plaintext payload within a single block (BLOCK_SIZE - TAG_SIZE).
-pub const PAYLOAD_SIZE: usize = BLOCK_SIZE - TAG_SIZE;
+/// Size of the plaintext payload within a single block (BLOCK_SIZE - TAG_SIZE - NONCE_SIZE).
+/// Each block stores: [24-byte random nonce | ciphertext | 16-byte auth tag].
+pub const PAYLOAD_SIZE: usize = BLOCK_SIZE - TAG_SIZE - NONCE_SIZE;
 
 /// Maximum number of slot candidates for cuckoo-style collision resolution.
 pub const MAX_SLOTS: u32 = 5;

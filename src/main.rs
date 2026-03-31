@@ -253,6 +253,11 @@ fn main() {
             let (mut img, secret) =
                 open_image_and_derive_secret(&image, passphrase.as_bytes(), get_preset(dev));
 
+            // Populate collision tracking from existing files before writing
+            voidfs::fs::ops::populate_claims(&mut img, &secret).unwrap_or_else(|e| {
+                eprintln!("Warning: could not scan existing files: {e}");
+            });
+
             create_file(&mut img, &secret, &file, &data).unwrap_or_else(|e| {
                 eprintln!("Write error: {e}");
                 std::process::exit(1);

@@ -3,13 +3,15 @@
 //! These operations manage both file data and directory indices, ensuring
 //! that the `.dirindex` files stay consistent with the actual file data.
 
+use crate::crypto::keys::derive_block_key;
+use crate::crypto::locator::block_offset;
 use crate::fs::directory::{read_dirindex, write_dirindex, DirIndex, FileType};
 use crate::fs::file::{read_file, write_file};
 use crate::fs::inode::FileHeader;
 use crate::fs::path::{canonical_path, dirindex_path, filename_of, parent_of};
 use crate::store::image::ImageFile;
 use crate::store::slots::{erase_slot, read_slot};
-use crate::util::constants::HEADER_SIZE;
+use crate::util::constants::{HEADER_SIZE, MAX_SLOTS};
 use crate::util::errors::{VoidError, VoidResult};
 
 /// Names reserved for internal use that cannot be used as filenames.
@@ -306,6 +308,82 @@ fn walk_dir_for_tree(
             FileType::Directory => {
                 entries.push((child_path.clone(), FileType::Directory, 0));
                 walk_dir_for_tree(image, master_secret, &child_path, entries)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Walk the filesystem tree and claim block offsets for all known files.
+///
+/// This populates the `ImageFile`'s collision tracking set so that subsequent
+/// writes will not silently overwrite blocks belonging to existing files.
+/// Should be called once after opening an image (e.g., at mount time or
+/// before a write session in CLI mode).
+pub fn populate_claims(
+    image: &mut ImageFile,
+    master_secret: &[u8; 32],
+) -> VoidResult<()> {
+    walk_dir_for_claims(image, master_secret, "/")
+}
+
+fn walk_dir_for_claims(
+    image: &mut ImageFile,
+    master_secret: &[u8; 32],
+    dir: &str,
+) -> VoidResult<()> {
+    // Claim blocks for this directory's .dirindex file
+    let idx_path = dirindex_path(dir);
+    claim_file_blocks(image, master_secret, &idx_path)?;
+
+    // Read the dirindex to discover children
+    let dir_idx = read_dirindex(image, master_secret, dir)?;
+
+    for entry in &dir_idx.entries {
+        let child_path = if dir == "/" {
+            format!("/{}", entry.name)
+        } else {
+            format!("{dir}/{}", entry.name)
+        };
+
+        match entry.entry_type {
+            FileType::File => {
+                claim_file_blocks(image, master_secret, &child_path)?;
+            }
+            FileType::Directory => {
+                walk_dir_for_claims(image, master_secret, &child_path)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Claim the block offsets used by a single file (by reading its header
+/// and finding the actual slot for each block).
+fn claim_file_blocks(
+    image: &mut ImageFile,
+    master_secret: &[u8; 32],
+    canonical: &str,
+) -> VoidResult<()> {
+    // Read block 0 to discover the file and get block_count
+    let block_count = match read_file_block_count(image, master_secret, canonical)? {
+        Some(count) => count,
+        None => return Ok(()), // file doesn't exist — nothing to claim
+    };
+
+    // Block 0 was already claimed by read_slot inside read_file_block_count.
+    // Now claim blocks 1..N by finding which slot each one occupies.
+    let total_blocks = image.total_blocks();
+    for block_num in 1..block_count as u64 {
+        let key = derive_block_key(master_secret, canonical, block_num)?;
+        for slot in 0..MAX_SLOTS {
+            let offset = block_offset(master_secret, canonical, block_num, slot, total_blocks);
+            let raw = image.read_block(offset)?;
+            if crate::crypto::cipher::decrypt_block(&key, &raw).is_ok() {
+                image.claim_offset(offset);
+                break;
             }
         }
     }

@@ -3,20 +3,34 @@
 //! Each `(path, block_num)` has up to [`MAX_SLOTS`] possible disk locations.
 //! When writing, we try each slot in order: if it already belongs to us
 //! (decrypts successfully), we overwrite it; otherwise we pick the first
-//! "available" slot (one that fails to decrypt with our key).
+//! "available" slot (one that fails to decrypt with our key AND is not
+//! claimed by another block in this session).
 
 use crate::crypto::cipher::{decrypt_block, encrypt_block};
-use crate::crypto::keys::derive_block_keys;
+use crate::crypto::keys::derive_block_key;
 use crate::crypto::locator::block_offset;
 use crate::store::image::ImageFile;
-use crate::util::constants::{MAX_SLOTS, PAYLOAD_SIZE};
+use crate::util::constants::{BLOCK_SIZE, MAX_SLOTS, PAYLOAD_SIZE};
 use crate::util::errors::{VoidError, VoidResult};
+
+/// Perform a dummy encryption to equalize timing with a successful decryption.
+///
+/// When `decrypt_block` fails (wrong key / random data), the crypto library
+/// short-circuits after Poly1305 tag verification WITHOUT running the ChaCha20
+/// keystream to decrypt the ciphertext. A successful decrypt does that extra work.
+///
+/// This function runs `encrypt_block` on dummy data to compensate, ensuring both
+/// the success and failure paths do roughly the same amount of ChaCha20 computation.
+#[inline(never)]
+fn timing_equalize(key: &[u8; 32], dummy: &mut [u8; PAYLOAD_SIZE]) {
+    let _ = std::hint::black_box(encrypt_block(key, dummy));
+}
 
 /// Write an encrypted block, resolving collisions across slots.
 ///
 /// Tries each slot 0..MAX_SLOTS. Prefers overwriting our own slot (decrypt
-/// succeeds). Falls back to the first slot where decrypt fails (random data
-/// or another filesystem's block).
+/// succeeds). Falls back to the first slot where decrypt fails and the offset
+/// is not claimed by another block in this session.
 ///
 /// Always iterates ALL slots to avoid leaking which slot is used via timing.
 pub fn write_slot(
@@ -26,31 +40,42 @@ pub fn write_slot(
     block_num: u64,
     plaintext: &[u8; PAYLOAD_SIZE],
 ) -> VoidResult<()> {
-    let keys = derive_block_keys(master_secret, canonical_path, block_num)?;
-    let encrypted = encrypt_block(&keys.key, &keys.nonce, plaintext)?;
+    let key = derive_block_key(master_secret, canonical_path, block_num)?;
+    let encrypted = encrypt_block(&key, plaintext)?;
 
     let total_blocks = image.total_blocks();
     let mut own_slot: Option<u64> = None;
     let mut first_available: Option<u64> = None;
+
+    // Dummy buffer to equalize work across success/failure decrypt paths (timing fix)
+    let mut dummy = [0u8; PAYLOAD_SIZE];
 
     // Always iterate ALL slots (constant-time iteration count for side-channel resistance)
     for slot in 0..MAX_SLOTS {
         let offset = block_offset(master_secret, canonical_path, block_num, slot, total_blocks);
         let existing = image.read_block(offset)?;
 
-        if decrypt_block(&keys.key, &keys.nonce, &existing).is_ok() {
-            // This slot belongs to us — prefer it
-            if own_slot.is_none() {
-                own_slot = Some(offset);
+        match decrypt_block(&key, &existing) {
+            Ok(plaintext_buf) => {
+                dummy.copy_from_slice(&plaintext_buf);
+                if own_slot.is_none() {
+                    own_slot = Some(offset);
+                }
             }
-        } else if first_available.is_none() {
-            first_available = Some(offset);
+            Err(_) => {
+                // Equalize crypto work: run a dummy encrypt (same ChaCha20 cost as decrypt)
+                timing_equalize(&key, &mut dummy);
+                if first_available.is_none() && !image.is_offset_claimed(offset) {
+                    first_available = Some(offset);
+                }
+            }
         }
     }
 
     // Prefer our own slot, then first available
     if let Some(offset) = own_slot.or(first_available) {
         image.write_block(offset, &encrypted)?;
+        image.claim_offset(offset);
         Ok(())
     } else {
         Err(VoidError::NoSlotAvailable {
@@ -73,18 +98,29 @@ pub fn read_slot(
     canonical_path: &str,
     block_num: u64,
 ) -> VoidResult<Option<[u8; PAYLOAD_SIZE]>> {
-    let keys = derive_block_keys(master_secret, canonical_path, block_num)?;
+    let key = derive_block_key(master_secret, canonical_path, block_num)?;
     let total_blocks = image.total_blocks();
     let mut found: Option<[u8; PAYLOAD_SIZE]> = None;
+
+    // Dummy buffer to equalize work across success/failure decrypt paths (timing fix)
+    let mut dummy = [0u8; PAYLOAD_SIZE];
 
     // Always iterate ALL slots (constant-time iteration count for side-channel resistance)
     for slot in 0..MAX_SLOTS {
         let offset = block_offset(master_secret, canonical_path, block_num, slot, total_blocks);
         let raw = image.read_block(offset)?;
 
-        if let Ok(plaintext) = decrypt_block(&keys.key, &keys.nonce, &raw) {
-            if found.is_none() {
-                found = Some(plaintext);
+        match decrypt_block(&key, &raw) {
+            Ok(plaintext) => {
+                dummy.copy_from_slice(&plaintext);
+                if found.is_none() {
+                    found = Some(plaintext);
+                    image.claim_offset(offset);
+                }
+            }
+            Err(_) => {
+                // Equalize crypto work: run a dummy encrypt (same ChaCha20 cost as decrypt)
+                timing_equalize(&key, &mut dummy);
             }
         }
     }
@@ -104,20 +140,32 @@ pub fn erase_slot(
     canonical_path: &str,
     block_num: u64,
 ) -> VoidResult<bool> {
-    let keys = derive_block_keys(master_secret, canonical_path, block_num)?;
+    let key = derive_block_key(master_secret, canonical_path, block_num)?;
     let total_blocks = image.total_blocks();
     let mut erased = false;
+
+    // Dummy buffer for timing equalization
+    let mut dummy = [0u8; PAYLOAD_SIZE];
 
     // Always iterate ALL slots
     for slot in 0..MAX_SLOTS {
         let offset = block_offset(master_secret, canonical_path, block_num, slot, total_blocks);
         let raw = image.read_block(offset)?;
 
-        if decrypt_block(&keys.key, &keys.nonce, &raw).is_ok() && !erased {
-            let mut random_data = [0u8; crate::util::constants::BLOCK_SIZE];
-            rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut random_data);
-            image.write_block(offset, &random_data)?;
-            erased = true;
+        match decrypt_block(&key, &raw) {
+            Ok(plaintext) => {
+                dummy.copy_from_slice(&plaintext);
+                if !erased {
+                    let mut random_data = [0u8; BLOCK_SIZE];
+                    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut random_data);
+                    image.write_block(offset, &random_data)?;
+                    image.release_offset(offset);
+                    erased = true;
+                }
+            }
+            Err(_) => {
+                timing_equalize(&key, &mut dummy);
+            }
         }
     }
 
@@ -127,7 +175,6 @@ pub fn erase_slot(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::constants::BLOCK_SIZE;
     use rand::RngCore;
     use tempfile::NamedTempFile;
 
@@ -228,5 +275,34 @@ mod tests {
             read_slot(&mut img, &secret, "/file_b", 0).unwrap(),
             Some(payload_b)
         );
+    }
+
+    #[test]
+    fn collision_tracking_prevents_overwrite() {
+        // With a tiny image, writes should fail rather than silently destroy data
+        let (_tmp, mut img) = create_random_image(8);
+        let secret = [42u8; 32];
+
+        let mut successes = 0;
+        let mut failures = 0;
+        for i in 0..50 {
+            let path = format!("/file_{}", i);
+            let payload = [i as u8; PAYLOAD_SIZE];
+            match write_slot(&mut img, &secret, &path, 0, &payload) {
+                Ok(()) => successes += 1,
+                Err(VoidError::NoSlotAvailable { .. }) => failures += 1,
+                Err(e) => panic!("unexpected error: {}", e),
+            }
+        }
+        assert!(failures > 0, "should have some failures on tiny image");
+
+        // All successful writes should be readable
+        for i in 0..successes.min(50) {
+            let path = format!("/file_{}", i);
+            let payload = [i as u8; PAYLOAD_SIZE];
+            if let Some(data) = read_slot(&mut img, &secret, &path, 0).unwrap() {
+                assert_eq!(data, payload, "file {} corrupted", i);
+            }
+        }
     }
 }

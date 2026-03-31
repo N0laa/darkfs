@@ -87,6 +87,10 @@ impl VoidFsHandler {
             gid,
         };
         handler.assign_ino("/".to_string());
+
+        // Populate collision tracking from existing files on disk
+        let _ = crate::fs::ops::populate_claims(&mut handler.image, &handler.master_secret);
+
         handler
     }
 

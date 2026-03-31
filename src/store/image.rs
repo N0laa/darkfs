@@ -2,7 +2,11 @@
 //!
 //! An [`ImageFile`] provides direct access to fixed-size blocks on the
 //! underlying void image. All I/O is block-aligned.
+//!
+//! The `used_offsets` set tracks which block offsets are known to contain
+//! data for the current session, preventing silent data loss from collisions.
 
+use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -14,6 +18,9 @@ use crate::util::errors::{VoidError, VoidResult};
 pub struct ImageFile {
     file: File,
     total_blocks: u64,
+    /// Block offsets known to contain data for the current session.
+    /// Prevents new writes from silently overwriting existing file blocks.
+    used_offsets: HashSet<u64>,
 }
 
 impl ImageFile {
@@ -34,6 +41,7 @@ impl ImageFile {
         Ok(Self {
             file,
             total_blocks: size / BLOCK_SIZE as u64,
+            used_offsets: HashSet::new(),
         })
     }
 
@@ -70,6 +78,23 @@ impl ImageFile {
         self.file.write_all(data)?;
         self.file.flush()?;
         Ok(())
+    }
+
+    /// Mark a block offset as claimed by the current session.
+    ///
+    /// Prevents other writes from silently overwriting this block.
+    pub fn claim_offset(&mut self, offset: u64) {
+        self.used_offsets.insert(offset);
+    }
+
+    /// Check whether a block offset is already claimed.
+    pub fn is_offset_claimed(&self, offset: u64) -> bool {
+        self.used_offsets.contains(&offset)
+    }
+
+    /// Release a claimed block offset (e.g., after erasing).
+    pub fn release_offset(&mut self, offset: u64) {
+        self.used_offsets.remove(&offset);
     }
 }
 
@@ -128,5 +153,17 @@ mod tests {
         let mut img = ImageFile::open(tmp.path()).unwrap();
         let result = img.write_block(4, &[0u8; BLOCK_SIZE]);
         assert!(matches!(result, Err(VoidError::BlockOutOfRange { .. })));
+    }
+
+    #[test]
+    fn claim_and_check_offset() {
+        let tmp = create_test_image(4);
+        let mut img = ImageFile::open(tmp.path()).unwrap();
+
+        assert!(!img.is_offset_claimed(0));
+        img.claim_offset(0);
+        assert!(img.is_offset_claimed(0));
+        img.release_offset(0);
+        assert!(!img.is_offset_claimed(0));
     }
 }
