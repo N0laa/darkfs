@@ -23,49 +23,24 @@ fn two_users_independent_files() {
     write_file(&mut img, &secret_b, "/passwords.txt", b"bob-passwords").unwrap();
 
     // User A can read their files
-    assert_eq!(
-        read_file(&mut img, &secret_a, "/docs/notes.txt")
-            .unwrap()
-            .as_deref(),
-        Some(b"Alice's notes".as_slice())
-    );
-    assert_eq!(
-        read_file(&mut img, &secret_a, "/secret.key")
-            .unwrap()
-            .as_deref(),
-        Some(b"alice-key-data".as_slice())
-    );
+    let d = read_file(&mut img, &secret_a, "/docs/notes.txt").unwrap().unwrap();
+    assert_eq!(&*d, b"Alice's notes");
+    let d = read_file(&mut img, &secret_a, "/secret.key").unwrap().unwrap();
+    assert_eq!(&*d, b"alice-key-data");
 
     // User A cannot see User B's files
-    assert_eq!(
-        read_file(&mut img, &secret_a, "/data/report.csv").unwrap(),
-        None
-    );
-    assert_eq!(
-        read_file(&mut img, &secret_a, "/passwords.txt").unwrap(),
-        None
-    );
+    assert!(read_file(&mut img, &secret_a, "/data/report.csv").unwrap().is_none());
+    assert!(read_file(&mut img, &secret_a, "/passwords.txt").unwrap().is_none());
 
     // User B can read their files
-    assert_eq!(
-        read_file(&mut img, &secret_b, "/data/report.csv")
-            .unwrap()
-            .as_deref(),
-        Some(b"Bob's report".as_slice())
-    );
-    assert_eq!(
-        read_file(&mut img, &secret_b, "/passwords.txt")
-            .unwrap()
-            .as_deref(),
-        Some(b"bob-passwords".as_slice())
-    );
+    let d = read_file(&mut img, &secret_b, "/data/report.csv").unwrap().unwrap();
+    assert_eq!(&*d, b"Bob's report");
+    let d = read_file(&mut img, &secret_b, "/passwords.txt").unwrap().unwrap();
+    assert_eq!(&*d, b"bob-passwords");
 
     // User B cannot see User A's files
-    assert_eq!(
-        read_file(&mut img, &secret_b, "/docs/notes.txt").unwrap(),
-        None
-    );
-    assert_eq!(read_file(&mut img, &secret_b, "/secret.key").unwrap(), None);
+    assert!(read_file(&mut img, &secret_b, "/docs/notes.txt").unwrap().is_none());
+    assert!(read_file(&mut img, &secret_b, "/secret.key").unwrap().is_none());
 }
 
 #[test]
@@ -81,16 +56,8 @@ fn same_virtual_path_different_users() {
     write_file(&mut img, &secret_b, "/shared.txt", b"Bob's version").unwrap();
 
     // Each sees their own version
-    assert_eq!(
-        read_file(&mut img, &secret_a, "/shared.txt")
-            .unwrap()
-            .as_deref(),
-        Some(b"Alice's version".as_slice())
-    );
-    assert_eq!(
-        read_file(&mut img, &secret_b, "/shared.txt")
-            .unwrap()
-            .as_deref(),
-        Some(b"Bob's version".as_slice())
-    );
+    let d = read_file(&mut img, &secret_a, "/shared.txt").unwrap().unwrap();
+    assert_eq!(&*d, b"Alice's version");
+    let d = read_file(&mut img, &secret_b, "/shared.txt").unwrap().unwrap();
+    assert_eq!(&*d, b"Bob's version");
 }

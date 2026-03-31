@@ -1,9 +1,22 @@
 //! Argon2id key derivation: passphrase → master secret.
 //!
-//! The salt is derived from the image size (not stored on disk) to preserve
-//! deniability. Two images of identical size with the same passphrase produce
-//! the same master secret — this is acceptable because the passphrase provides
-//! the primary entropy.
+//! The salt is `SHA-256("voidfs-v1-{image_size}")`, derived from the image
+//! file size (not stored on disk) to preserve deniability. Two images of
+//! identical size with the same passphrase produce the same master secret.
+//!
+//! # Known limitation (deterministic salt)
+//!
+//! Since the salt is derived from image size, an attacker could precompute
+//! rainbow tables indexed by common image sizes. Argon2id's memory-hard cost
+//! (256 MiB × 4 iterations in production mode) makes this expensive but not
+//! impossible for well-funded adversaries. Mitigations:
+//!
+//! - **Use strong, unique passphrases.** The passphrase provides the actual
+//!   entropy; the salt's role is only to prevent cross-image precomputation.
+//! - **Use non-standard image sizes.** Appending a few random kilobytes to
+//!   the image makes the size (and thus salt) unique.
+//! - Storing a per-image random salt on disk would eliminate this issue but
+//!   would break deniability (the salt would be a recognizable structure).
 
 use argon2::{Algorithm, Argon2, Params, Version};
 use sha2::{Digest, Sha256};
@@ -49,6 +62,31 @@ pub fn derive_master_secret(
     Ok(output)
 }
 
+/// Derive a session secret by mixing the master secret with a per-image random salt.
+///
+/// `session_secret = HKDF-Expand(PRK from master_secret, info="voidfs-session" || random_salt)`
+///
+/// This ensures two images with the same passphrase and size have different
+/// file encryption keys (because they have different `random_salt` values).
+/// The `random_salt` is stored in the encrypted superblock and is generated
+/// once per image on first use.
+pub fn derive_session_secret(
+    master_secret: &[u8; 32],
+    random_salt: &[u8; 32],
+) -> Result<Zeroizing<[u8; 32]>, VoidError> {
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+
+    let hkdf = Hkdf::<Sha256>::new(Some(master_secret), master_secret);
+    let mut session = Zeroizing::new([0u8; 32]);
+    let mut info = [0u8; 14 + 32];
+    info[..14].copy_from_slice(b"voidfs-session");
+    info[14..].copy_from_slice(random_salt);
+    hkdf.expand(&info, session.as_mut())
+        .map_err(|e| VoidError::Kdf(format!("HKDF expand (session): {e}")))?;
+    Ok(session)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,5 +120,32 @@ mod tests {
     fn output_is_32_bytes() {
         let secret = derive_master_secret(b"test", 4096, KdfPreset::Dev).expect("kdf");
         assert_eq!(secret.len(), 32);
+    }
+
+    #[test]
+    fn session_secret_differs_with_salt() {
+        let master = [42u8; 32];
+        let salt_a = [1u8; 32];
+        let salt_b = [2u8; 32];
+        let a = derive_session_secret(&master, &salt_a).unwrap();
+        let b = derive_session_secret(&master, &salt_b).unwrap();
+        assert_ne!(a.as_ref(), b.as_ref());
+    }
+
+    #[test]
+    fn session_secret_differs_from_master() {
+        let master = [42u8; 32];
+        let salt = [0u8; 32];
+        let session = derive_session_secret(&master, &salt).unwrap();
+        assert_ne!(session.as_ref(), &master);
+    }
+
+    #[test]
+    fn session_secret_deterministic() {
+        let master = [42u8; 32];
+        let salt = [7u8; 32];
+        let a = derive_session_secret(&master, &salt).unwrap();
+        let b = derive_session_secret(&master, &salt).unwrap();
+        assert_eq!(a.as_ref(), b.as_ref());
     }
 }

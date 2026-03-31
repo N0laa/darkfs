@@ -1,6 +1,9 @@
 //! Error types for voidfs.
 
 /// The primary error type for all voidfs operations.
+///
+/// Display messages are intentionally redacted to avoid leaking internal state
+/// (file paths, block offsets, image size). Use `Debug` formatting for diagnostics.
 #[derive(Debug, thiserror::Error)]
 pub enum VoidError {
     /// An I/O error occurred while reading or writing the image file.
@@ -8,7 +11,7 @@ pub enum VoidError {
     Io(#[from] std::io::Error),
 
     /// Block index is beyond the image boundary.
-    #[error("block index {index} out of range (total: {total})")]
+    #[error("block index out of range")]
     BlockOutOfRange {
         /// The requested block index.
         index: u64,
@@ -25,7 +28,7 @@ pub enum VoidError {
     Decrypt,
 
     /// All slot candidates are occupied; the disk is effectively full.
-    #[error("no available slot for path {path:?} block {block_num}")]
+    #[error("no available slot")]
     NoSlotAvailable {
         /// The file path that could not be written.
         path: String,
@@ -46,7 +49,7 @@ pub enum VoidError {
     Kdf(String),
 
     /// A file's blocks are partially missing (likely overwritten by a collision).
-    #[error("corrupt file: block {block_num} missing for path {path:?}")]
+    #[error("corrupt file: block missing")]
     CorruptFile {
         /// The file path.
         path: String,
@@ -54,8 +57,8 @@ pub enum VoidError {
         block_num: u64,
     },
 
-    /// The image file size is not a multiple of [`BLOCK_SIZE`].
-    #[error("image size {size} is not a multiple of block size {block_size}")]
+    /// The image file size is not valid (zero or not a multiple of [`BLOCK_SIZE`]).
+    #[error("invalid image size")]
     InvalidImageSize {
         /// The actual file size.
         size: u64,
@@ -64,14 +67,14 @@ pub enum VoidError {
     },
 
     /// A file or directory already exists at the given path.
-    #[error("already exists: {path}")]
+    #[error("already exists")]
     AlreadyExists {
         /// The path that already exists.
         path: String,
     },
 
     /// The directory is not empty and cannot be removed.
-    #[error("directory not empty: {path}")]
+    #[error("directory not empty")]
     DirectoryNotEmpty {
         /// The non-empty directory.
         path: String,
@@ -85,19 +88,50 @@ pub enum VoidError {
     },
 
     /// A reserved filename was used (e.g., `.dirindex`).
-    #[error("reserved filename: {name}")]
+    #[error("reserved filename")]
     ReservedName {
         /// The reserved filename.
         name: String,
     },
 
     /// The file is too large to store.
-    #[error("file too large: {size} bytes (max: {max})")]
+    #[error("file too large")]
     FileTooLarge {
         /// The requested file size.
         size: u64,
         /// The maximum supported size.
         max: u64,
+    },
+
+    /// The image file is locked by another process.
+    #[error("image is locked by another process")]
+    ImageLocked,
+
+    /// An invalid filename was provided.
+    #[error("invalid filename")]
+    InvalidName {
+        /// Why the name is invalid.
+        reason: String,
+    },
+
+    /// The superblock integrity check failed (corrupted or tampered).
+    #[error("superblock integrity check failed")]
+    SuperblockCorrupt,
+
+    /// The superblock slot map is full.
+    #[error("superblock full")]
+    SuperblockFull {
+        /// Maximum number of entries the superblock can hold.
+        max_entries: usize,
+    },
+
+    /// The generation counter decreased, indicating a possible replay attack.
+    #[error("generation mismatch")]
+    GenerationMismatch {
+        /// The expected minimum generation.
+        expected: u64,
+        /// The actual generation found.
+        actual: u64,
     },
 }
 

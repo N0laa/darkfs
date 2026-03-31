@@ -85,6 +85,81 @@ pub fn write_slot(
     }
 }
 
+/// Write an encrypted block using copy-on-write semantics.
+///
+/// Unlike [`write_slot`], this prefers writing to a *different* slot than the
+/// one currently holding our data, leaving the old block intact until the caller
+/// explicitly erases it. This enables atomic multi-block overwrites: data blocks
+/// are written to new slots first, then block 0 commits the update, then old
+/// slots are cleaned up.
+///
+/// Falls back to in-place overwrite if no other slot is available.
+///
+/// Returns `Ok(Some(old_offset))` if the block already existed (the old slot
+/// that should be erased after commit), or `Ok(None)` for a fresh write.
+pub fn write_slot_cow(
+    image: &mut ImageFile,
+    master_secret: &[u8; 32],
+    canonical_path: &str,
+    block_num: u64,
+    plaintext: &[u8; PAYLOAD_SIZE],
+) -> VoidResult<Option<u64>> {
+    let key = derive_block_key(master_secret, canonical_path, block_num)?;
+    let encrypted = encrypt_block(&key, plaintext)?;
+
+    let total_blocks = image.total_blocks();
+    let mut own_slot: Option<u64> = None;
+    let mut first_available: Option<u64> = None;
+
+    let mut dummy = [0u8; PAYLOAD_SIZE];
+
+    for slot in 0..MAX_SLOTS {
+        let offset = block_offset(master_secret, canonical_path, block_num, slot, total_blocks);
+        let existing = image.read_block(offset)?;
+
+        match decrypt_block(&key, &existing) {
+            Ok(plaintext_buf) => {
+                dummy.copy_from_slice(&plaintext_buf);
+                if own_slot.is_none() {
+                    own_slot = Some(offset);
+                }
+            }
+            Err(_) => {
+                timing_equalize(&key, &mut dummy);
+                if first_available.is_none() && !image.is_offset_claimed(offset) {
+                    first_available = Some(offset);
+                }
+            }
+        }
+    }
+
+    match (own_slot, first_available) {
+        // COW: we already own a slot AND there's a free slot — write to the new one
+        (Some(old_offset), Some(new_offset)) => {
+            image.write_block(new_offset, &encrypted)?;
+            image.claim_offset(new_offset);
+            Ok(Some(old_offset))
+        }
+        // No free slot but we own one — in-place overwrite (best effort)
+        (Some(old_offset), None) => {
+            image.write_block(old_offset, &encrypted)?;
+            image.claim_offset(old_offset);
+            Ok(None) // no old slot to erase since we overwrote in-place
+        }
+        // Fresh write — no old data
+        (None, Some(new_offset)) => {
+            image.write_block(new_offset, &encrypted)?;
+            image.claim_offset(new_offset);
+            Ok(None)
+        }
+        // No slot at all
+        (None, None) => Err(VoidError::NoSlotAvailable {
+            path: canonical_path.to_string(),
+            block_num,
+        }),
+    }
+}
+
 /// Read and decrypt a block, trying all slot candidates.
 ///
 /// Returns `Ok(Some(plaintext))` if found, `Ok(None)` if no slot decrypts
@@ -126,6 +201,17 @@ pub fn read_slot(
     }
 
     Ok(found)
+}
+
+/// Erase a specific block offset by overwriting with random data.
+///
+/// Used by COW write to clean up old slots after a successful commit.
+pub fn erase_slot_at(image: &mut ImageFile, offset: u64) -> VoidResult<()> {
+    let mut random_data = [0u8; BLOCK_SIZE];
+    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut random_data);
+    image.write_block(offset, &random_data)?;
+    image.release_offset(offset);
+    Ok(())
 }
 
 /// Erase a block by overwriting its slot with random data.

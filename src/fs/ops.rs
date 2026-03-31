@@ -3,6 +3,8 @@
 //! These operations manage both file data and directory indices, ensuring
 //! that the `.dirindex` files stay consistent with the actual file data.
 
+use zeroize::Zeroizing;
+
 use crate::crypto::keys::derive_block_key;
 use crate::crypto::locator::block_offset;
 use crate::fs::directory::{read_dirindex, write_dirindex, DirIndex, FileType};
@@ -48,18 +50,21 @@ pub fn create_file(
 
     // Update parent directory index
     let mut parent_idx = read_dirindex(image, master_secret, parent)?;
-    parent_idx.add(name.to_string(), FileType::File);
+    parent_idx.add(name.to_string(), FileType::File)?;
     write_dirindex(image, master_secret, parent, &parent_idx)?;
 
     Ok(())
 }
 
 /// Read a file's data. Returns `None` if the file doesn't exist.
+///
+/// The returned data is wrapped in [`Zeroizing`] so that plaintext is securely
+/// erased from memory when the value is dropped.
 pub fn read_file_data(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
     path: &str,
-) -> VoidResult<Option<Vec<u8>>> {
+) -> VoidResult<Option<Zeroizing<Vec<u8>>>> {
     let canon = canonical_path(path);
     read_file(image, master_secret, &canon)
 }
@@ -118,7 +123,7 @@ pub fn mkdir(image: &mut ImageFile, master_secret: &[u8; 32], path: &str) -> Voi
     write_dirindex(image, master_secret, &canon, &empty_idx)?;
 
     // Add to parent directory index
-    parent_idx.add(name.to_string(), FileType::Directory);
+    parent_idx.add(name.to_string(), FileType::Directory)?;
     write_dirindex(image, master_secret, parent, &parent_idx)?;
 
     Ok(())

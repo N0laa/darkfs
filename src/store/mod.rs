@@ -2,3 +2,4 @@
 
 pub mod image;
 pub mod slots;
+pub mod superblock;

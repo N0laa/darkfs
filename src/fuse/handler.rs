@@ -12,13 +12,14 @@ use fuser::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty,
     ReplyEntry, ReplyOpen, ReplyStatfs, ReplyWrite, Request,
 };
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use crate::fs::directory::FileType as VoidFileType;
 use crate::fs::file::{read_file, write_file};
 use crate::fs::ops::{self, list_dir};
 use crate::fs::path::{filename_of, parent_of};
 use crate::store::image::ImageFile;
+use crate::store::superblock::{write_superblock, Superblock};
 use crate::util::constants::BLOCK_SIZE;
 
 const TTL: Duration = Duration::from_secs(1);
@@ -28,6 +29,11 @@ const ROOT_INO: u64 = 1;
 pub struct VoidFsHandler {
     image: ImageFile,
     master_secret: Zeroizing<[u8; 32]>,
+    /// Session secret derived from master + per-image random salt.
+    /// Used for all file encryption/decryption.
+    session_secret: Zeroizing<[u8; 32]>,
+    /// The superblock (updated on writes, flushed on destroy).
+    superblock: Superblock,
     /// inode → canonical path
     ino_to_path: HashMap<u64, String>,
     /// canonical path → inode
@@ -45,15 +51,10 @@ pub struct VoidFsHandler {
 
 struct OpenFile {
     ino: u64,
-    /// Buffered data — loaded on open, flushed on release
-    data: Vec<u8>,
+    /// Buffered data — loaded on open, flushed on release.
+    /// Wrapped in [`Zeroizing`] so plaintext is securely erased on drop.
+    data: Zeroizing<Vec<u8>>,
     dirty: bool,
-}
-
-impl Drop for OpenFile {
-    fn drop(&mut self) {
-        self.data.zeroize();
-    }
 }
 
 /// Map a VoidError to an appropriate libc errno.
@@ -73,11 +74,20 @@ fn to_errno(e: &crate::util::errors::VoidError) -> i32 {
 }
 
 impl VoidFsHandler {
-    /// Create a new FUSE handler.
-    pub fn new(image: ImageFile, master_secret: [u8; 32], uid: u32, gid: u32) -> Self {
+    /// Create a new FUSE handler with pre-derived secrets and superblock.
+    pub fn new(
+        image: ImageFile,
+        master_secret: [u8; 32],
+        session_secret: [u8; 32],
+        superblock: Superblock,
+        uid: u32,
+        gid: u32,
+    ) -> Self {
         let mut handler = Self {
             image,
             master_secret: Zeroizing::new(master_secret),
+            session_secret: Zeroizing::new(session_secret),
+            superblock,
             ino_to_path: HashMap::new(),
             path_to_ino: HashMap::new(),
             next_ino: ROOT_INO + 1,
@@ -89,7 +99,7 @@ impl VoidFsHandler {
         handler.assign_ino("/".to_string());
 
         // Populate collision tracking from existing files on disk
-        let _ = crate::fs::ops::populate_claims(&mut handler.image, &handler.master_secret);
+        let _ = crate::fs::ops::populate_claims(&mut handler.image, &handler.session_secret);
 
         handler
     }
@@ -213,7 +223,7 @@ impl Filesystem for VoidFsHandler {
             }
         };
 
-        let dir_idx = match list_dir(&mut self.image, &self.master_secret, &parent_path) {
+        let dir_idx = match list_dir(&mut self.image, &self.session_secret, &parent_path) {
             Ok(idx) => idx,
             Err(_) => {
                 reply.error(libc::EIO);
@@ -236,7 +246,7 @@ impl Filesystem for VoidFsHandler {
             }
             Some(VoidFileType::File) => {
                 let ino = self.assign_ino(child.clone());
-                match ops::stat(&mut self.image, &self.master_secret, &child) {
+                match ops::stat(&mut self.image, &self.session_secret, &child) {
                     Ok(Some(header)) => {
                         reply.entry(&TTL, &self.make_file_attr_from_header(ino, &header), 0);
                     }
@@ -273,7 +283,7 @@ impl Filesystem for VoidFsHandler {
         let parent = parent_of(&path).to_string();
         let name = filename_of(&path).to_string();
 
-        let dir_idx = match list_dir(&mut self.image, &self.master_secret, &parent) {
+        let dir_idx = match list_dir(&mut self.image, &self.session_secret, &parent) {
             Ok(idx) => idx,
             Err(_) => {
                 reply.error(libc::EIO);
@@ -286,7 +296,7 @@ impl Filesystem for VoidFsHandler {
                 reply.attr(&TTL, &self.make_dir_attr(ino));
             }
             Some(VoidFileType::File) => {
-                match ops::stat(&mut self.image, &self.master_secret, &path) {
+                match ops::stat(&mut self.image, &self.session_secret, &path) {
                     Ok(Some(header)) => {
                         reply.attr(&TTL, &self.make_file_attr_from_header(ino, &header));
                     }
@@ -321,7 +331,7 @@ impl Filesystem for VoidFsHandler {
             }
         };
 
-        let dir_idx = match list_dir(&mut self.image, &self.master_secret, &path) {
+        let dir_idx = match list_dir(&mut self.image, &self.session_secret, &path) {
             Ok(idx) => idx,
             Err(_) => {
                 reply.error(libc::EIO);
@@ -368,9 +378,9 @@ impl Filesystem for VoidFsHandler {
         };
 
         // Load file data into buffer
-        let data = match read_file(&mut self.image, &self.master_secret, &path) {
+        let data = match read_file(&mut self.image, &self.session_secret, &path) {
             Ok(Some(d)) => d,
-            Ok(None) => Vec::new(),
+            Ok(None) => Zeroizing::new(Vec::new()),
             Err(_) => {
                 reply.error(libc::EIO);
                 return;
@@ -462,17 +472,15 @@ impl Filesystem for VoidFsHandler {
         if let Some(file) = self.open_files.get(&fh) {
             if file.dirty {
                 let ino = file.ino;
-                let mut data = file.data.clone();
+                let data = Zeroizing::new(file.data.to_vec()); // clone, auto-zeroized on drop
                 let path = match self.get_path(ino) {
                     Some(p) => p.to_string(),
                     None => {
-                        data.zeroize();
                         reply.error(libc::EIO);
                         return;
                     }
                 };
-                let result = write_file(&mut self.image, &self.master_secret, &path, &data);
-                data.zeroize(); // wipe the clone
+                let result = write_file(&mut self.image, &self.session_secret, &path, &data);
                 match result {
                     Ok(()) => {
                         self.open_files.get_mut(&fh).unwrap().dirty = false;
@@ -506,7 +514,7 @@ impl Filesystem for VoidFsHandler {
                         return;
                     }
                 };
-                if write_file(&mut self.image, &self.master_secret, &path, &file.data).is_err() {
+                if write_file(&mut self.image, &self.session_secret, &path, &file.data).is_err() {
                     reply.error(libc::EIO);
                     return;
                 }
@@ -534,7 +542,7 @@ impl Filesystem for VoidFsHandler {
         };
 
         // Create empty file
-        if let Err(e) = ops::create_file(&mut self.image, &self.master_secret, &child, &[]) {
+        if let Err(e) = ops::create_file(&mut self.image, &self.session_secret, &child, &[]) {
             reply.error(to_errno(&e));
             return;
         }
@@ -546,7 +554,7 @@ impl Filesystem for VoidFsHandler {
             fh,
             OpenFile {
                 ino,
-                data: Vec::new(),
+                data: Zeroizing::new(Vec::new()),
                 dirty: false,
             },
         );
@@ -564,7 +572,7 @@ impl Filesystem for VoidFsHandler {
             }
         };
 
-        match ops::delete_file(&mut self.image, &self.master_secret, &child) {
+        match ops::delete_file(&mut self.image, &self.session_secret, &child) {
             Ok(()) => reply.ok(),
             Err(ref e) => reply.error(to_errno(e)),
         }
@@ -587,7 +595,7 @@ impl Filesystem for VoidFsHandler {
             }
         };
 
-        if let Err(e) = ops::mkdir(&mut self.image, &self.master_secret, &child) {
+        if let Err(e) = ops::mkdir(&mut self.image, &self.session_secret, &child) {
             reply.error(to_errno(&e));
             return;
         }
@@ -605,7 +613,7 @@ impl Filesystem for VoidFsHandler {
             }
         };
 
-        match ops::rmdir(&mut self.image, &self.master_secret, &child) {
+        match ops::rmdir(&mut self.image, &self.session_secret, &child) {
             Ok(()) => reply.ok(),
             Err(ref e) => reply.error(to_errno(e)),
         }
@@ -653,9 +661,9 @@ impl Filesystem for VoidFsHandler {
                 }
             };
 
-            let mut data = match read_file(&mut self.image, &self.master_secret, &path) {
+            let mut data = match read_file(&mut self.image, &self.session_secret, &path) {
                 Ok(Some(d)) => d,
-                Ok(None) => Vec::new(),
+                Ok(None) => Zeroizing::new(Vec::new()),
                 Err(_) => {
                     reply.error(libc::EIO);
                     return;
@@ -663,7 +671,7 @@ impl Filesystem for VoidFsHandler {
             };
 
             data.resize(new_size, 0);
-            if write_file(&mut self.image, &self.master_secret, &path, &data).is_err() {
+            if write_file(&mut self.image, &self.session_secret, &path, &data).is_err() {
                 reply.error(libc::EIO);
                 return;
             }
@@ -687,7 +695,7 @@ impl Filesystem for VoidFsHandler {
             return;
         }
 
-        match ops::stat(&mut self.image, &self.master_secret, &path) {
+        match ops::stat(&mut self.image, &self.session_secret, &path) {
             Ok(Some(header)) => {
                 reply.attr(&TTL, &self.make_file_attr_from_header(ino, &header));
             }
@@ -732,5 +740,11 @@ impl Filesystem for VoidFsHandler {
 
     fn access(&mut self, _req: &Request<'_>, _ino: u64, _mask: i32, reply: ReplyEmpty) {
         reply.ok();
+    }
+
+    fn destroy(&mut self) {
+        // Flush superblock with updated generation on unmount
+        self.superblock.generation += 1;
+        let _ = write_superblock(&mut self.image, &self.master_secret, &self.superblock);
     }
 }

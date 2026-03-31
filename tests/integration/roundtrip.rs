@@ -19,8 +19,8 @@ fn test_roundtrip(data_size: usize) {
     }
 
     write_file(&mut img, &secret, "/test/file.bin", &data).unwrap();
-    let result = read_file(&mut img, &secret, "/test/file.bin").unwrap();
-    assert_eq!(result, Some(data));
+    let result = read_file(&mut img, &secret, "/test/file.bin").unwrap().unwrap();
+    assert_eq!(&*result, &data);
 }
 
 #[test]

@@ -179,7 +179,7 @@ fn collision_tracking_prevents_data_loss() {
     // ALL successfully written files must be readable
     for (path, original) in &written {
         match read_file(&mut img, &secret, path) {
-            Ok(Some(data)) => assert_eq!(&data, original, "{path} corrupted"),
+            Ok(Some(data)) => assert_eq!(&*data, original, "{path} corrupted"),
             Ok(None) => panic!("{path} lost — collision tracking failed"),
             Err(e) => panic!("{path} error: {e}"),
         }
@@ -208,7 +208,7 @@ fn populate_claims_protects_across_sessions() {
     // So verify the first session files are intact — read_slot claims offsets on success
     for (path, original) in &written {
         match read_file(&mut img, &secret, path) {
-            Ok(Some(data)) => assert_eq!(&data, original, "{path} corrupted after reopen"),
+            Ok(Some(data)) => assert_eq!(&*data, original, "{path} corrupted after reopen"),
             Ok(None) => panic!("{path} lost after reopen"),
             Err(e) => panic!("{path} error after reopen: {e}"),
         }
@@ -223,7 +223,7 @@ fn populate_claims_protects_across_sessions() {
     // Original files should still be intact
     for (path, original) in &written {
         match read_file(&mut img, &secret, path) {
-            Ok(Some(data)) => assert_eq!(&data, original, "{path} destroyed by second session writes"),
+            Ok(Some(data)) => assert_eq!(&*data, original, "{path} destroyed by second session writes"),
             other => panic!("{path} lost or errored: {other:?}"),
         }
     }
@@ -260,8 +260,8 @@ fn path_traversal_overwrites_same_file() {
     write_file(&mut img, &secret, "/target", b"original").unwrap();
     write_file(&mut img, &secret, "/sub/../target", b"overwritten").unwrap();
 
-    let data = read_file(&mut img, &secret, "/target").unwrap();
-    assert_eq!(data, Some(b"overwritten".to_vec()));
+    let data = read_file(&mut img, &secret, "/target").unwrap().unwrap();
+    assert_eq!(&*data, b"overwritten");
 }
 
 // --- Crash recovery ---
@@ -277,8 +277,8 @@ fn corrupted_block_returns_error_not_panic() {
     write_file(&mut img, &secret, "/crash", &data).unwrap();
 
     // Verify pre-corruption read
-    let readback = read_file(&mut img, &secret, "/crash").unwrap();
-    assert_eq!(readback, Some(data));
+    let readback = read_file(&mut img, &secret, "/crash").unwrap().unwrap();
+    assert_eq!(&*readback, &data);
 
     // Corrupt block 2
     let canon = canonical_path("/crash");

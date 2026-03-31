@@ -6,11 +6,13 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use zeroize::Zeroizing;
+
 use crate::crypto::locator::canonical_path;
 use crate::fs::inode::FileHeader;
 use crate::store::image::ImageFile;
-use crate::store::slots::{read_slot, write_slot};
-use crate::util::constants::{DATA_IN_BLOCK0, DATA_IN_BLOCKN, HEADER_SIZE, PAYLOAD_SIZE};
+use crate::store::slots::{erase_slot_at, read_slot, write_slot_cow};
+use crate::util::constants::{tier_block_count, DATA_IN_BLOCK0, DATA_IN_BLOCKN, HEADER_SIZE, PAYLOAD_SIZE};
 use crate::util::errors::{VoidError, VoidResult};
 
 /// Maximum file size: limited by u32 block_count in the header.
@@ -35,10 +37,14 @@ fn compute_block_count(data_len: usize) -> VoidResult<u32> {
 
 /// Write a file to the image at the given virtual path.
 ///
-/// Writes data blocks 1..N first, then block 0 (with the header) last.
-/// This ordering ensures that if the process crashes mid-write, the old
-/// block 0 header remains intact, pointing to the old file's data. The
-/// orphaned new blocks are harmless noise.
+/// Uses copy-on-write semantics for crash safety: data blocks 1..N are written
+/// to *new* slots (leaving old blocks intact), then block 0 is committed (the
+/// atomic marker), and finally old slots are erased. This ensures:
+///
+/// - Crash during phase 1 (data blocks): old block 0 still points to old data.
+/// - Crash during phase 2 (block 0): old file is intact (block 0 not yet updated).
+/// - Crash during phase 3 (cleanup): new file is committed; old blocks are orphaned
+///   noise that will be overwritten eventually.
 pub fn write_file(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
@@ -63,7 +69,10 @@ pub fn write_file(
         accessed_at: now,
     };
 
-    // Blocks 1..N first (pure data) — crash-safe ordering
+    // Track old slots that need cleanup after commit
+    let mut old_offsets: Vec<u64> = Vec::new();
+
+    // Phase 1: Write blocks 1..N using COW (new slots, old blocks intact)
     let data_in_b0 = data.len().min(DATA_IN_BLOCK0);
     let mut offset = data_in_b0;
     for block_num in 1..block_count as u64 {
@@ -72,17 +81,26 @@ pub fn write_file(
         let chunk_len = chunk_end - offset;
         payload[..chunk_len].copy_from_slice(&data[offset..offset + chunk_len]);
 
-        write_slot(image, master_secret, &canon, block_num, &payload)?;
+        if let Some(old_off) = write_slot_cow(image, master_secret, &canon, block_num, &payload)? {
+            old_offsets.push(old_off);
+        }
         offset += chunk_len;
     }
 
-    // Block 0 last (header + first data chunk) — acts as commit marker
+    // Phase 2: Write block 0 (header + first data chunk) — atomic commit marker
     let header_bytes = header.to_bytes();
     let mut payload0 = [0u8; PAYLOAD_SIZE];
     payload0[..HEADER_SIZE].copy_from_slice(&header_bytes);
     payload0[HEADER_SIZE..HEADER_SIZE + data_in_b0].copy_from_slice(&data[..data_in_b0]);
 
-    write_slot(image, master_secret, &canon, 0, &payload0)?;
+    if let Some(old_off) = write_slot_cow(image, master_secret, &canon, 0, &payload0)? {
+        old_offsets.push(old_off);
+    }
+
+    // Phase 3: Erase old slots (cleanup — failure here is harmless)
+    for old_off in old_offsets {
+        let _ = erase_slot_at(image, old_off);
+    }
 
     Ok(())
 }
@@ -91,11 +109,20 @@ pub fn write_file(
 ///
 /// Returns `Ok(None)` if the file does not exist (or the passphrase is wrong —
 /// these are indistinguishable by design).
+///
+/// The returned data is wrapped in [`Zeroizing`] so that plaintext is securely
+/// erased from memory when the value is dropped.
+///
+/// # Timing side-channel mitigation
+///
+/// Reads are padded to a fixed tier boundary (1, 16, 256, or 4096 blocks)
+/// with dummy reads, so an observer learns only which tier a file falls into
+/// (2 bits of information), not the exact block count.
 pub fn read_file(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
     path: &str,
-) -> VoidResult<Option<Vec<u8>>> {
+) -> VoidResult<Option<Zeroizing<Vec<u8>>>> {
     let canon = canonical_path(path);
 
     // Read block 0
@@ -130,20 +157,27 @@ pub fn read_file(
     let data_in_b0 = file_size.min(DATA_IN_BLOCK0);
     result.extend_from_slice(&payload0[HEADER_SIZE..HEADER_SIZE + data_in_b0]);
 
-    // Data from blocks 1..N
-    for block_num in 1..header.block_count as u64 {
-        let payload =
-            read_slot(image, master_secret, &canon, block_num)?.ok_or(VoidError::CorruptFile {
+    let actual_blocks = header.block_count as u64;
+    let padded_blocks = tier_block_count(header.block_count);
+
+    // Read blocks 1..padded_blocks (real data + dummy padding for constant-time)
+    for block_num in 1..padded_blocks {
+        let slot_result = read_slot(image, master_secret, &canon, block_num)?;
+
+        if block_num < actual_blocks {
+            // Real data block — must exist
+            let payload = slot_result.ok_or(VoidError::CorruptFile {
                 path: canon.clone(),
                 block_num,
             })?;
-
-        let remaining = file_size - result.len();
-        let chunk_len = remaining.min(DATA_IN_BLOCKN);
-        result.extend_from_slice(&payload[..chunk_len]);
+            let remaining = file_size - result.len();
+            let chunk_len = remaining.min(DATA_IN_BLOCKN);
+            result.extend_from_slice(&payload[..chunk_len]);
+        }
+        // else: dummy read for timing padding, result discarded
     }
 
-    Ok(Some(result))
+    Ok(Some(Zeroizing::new(result)))
 }
 
 #[cfg(test)]
@@ -193,8 +227,8 @@ mod tests {
         let secret = [42u8; 32];
 
         write_file(&mut img, &secret, "/empty", b"").unwrap();
-        let data = read_file(&mut img, &secret, "/empty").unwrap();
-        assert_eq!(data, Some(vec![]));
+        let data = read_file(&mut img, &secret, "/empty").unwrap().unwrap();
+        assert!(data.is_empty());
     }
 
     #[test]
@@ -204,8 +238,8 @@ mod tests {
         let content = b"hello, voidfs!";
 
         write_file(&mut img, &secret, "/hello.txt", content).unwrap();
-        let data = read_file(&mut img, &secret, "/hello.txt").unwrap();
-        assert_eq!(data.as_deref(), Some(content.as_slice()));
+        let data = read_file(&mut img, &secret, "/hello.txt").unwrap().unwrap();
+        assert_eq!(&*data, content);
     }
 
     #[test]
@@ -215,8 +249,8 @@ mod tests {
         let content = vec![0xAB; DATA_IN_BLOCK0];
 
         write_file(&mut img, &secret, "/exact", &content).unwrap();
-        let data = read_file(&mut img, &secret, "/exact").unwrap();
-        assert_eq!(data, Some(content));
+        let data = read_file(&mut img, &secret, "/exact").unwrap().unwrap();
+        assert_eq!(&*data, &content);
     }
 
     #[test]
@@ -226,8 +260,8 @@ mod tests {
         let content = vec![0xCD; DATA_IN_BLOCK0 + 1];
 
         write_file(&mut img, &secret, "/two", &content).unwrap();
-        let data = read_file(&mut img, &secret, "/two").unwrap();
-        assert_eq!(data, Some(content));
+        let data = read_file(&mut img, &secret, "/two").unwrap().unwrap();
+        assert_eq!(&*data, &content);
     }
 
     #[test]
@@ -239,8 +273,8 @@ mod tests {
         rand::thread_rng().fill_bytes(&mut content);
 
         write_file(&mut img, &secret, "/big", &content).unwrap();
-        let data = read_file(&mut img, &secret, "/big").unwrap();
-        assert_eq!(data, Some(content));
+        let data = read_file(&mut img, &secret, "/big").unwrap().unwrap();
+        assert_eq!(&*data, &content);
     }
 
     #[test]

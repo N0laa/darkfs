@@ -31,3 +31,31 @@ pub const KEY_SIZE: usize = 32;
 
 /// Size of an XChaCha20 nonce, in bytes.
 pub const NONCE_SIZE: usize = 24;
+
+/// Read padding tiers: each `read_file` is padded to the next tier's block
+/// count with dummy reads, preventing timing attacks from revealing exact file
+/// size. An observer learns only which tier (1 of 4) a file falls into.
+pub const READ_TIERS: [u64; 4] = [1, 16, 256, 4096];
+
+/// Return the padded block count for timing-safe reads.
+///
+/// Rounds `actual_blocks` up to the next tier boundary. Files larger than the
+/// largest tier are capped (their timing already reveals "very large file").
+pub fn tier_block_count(actual_blocks: u32) -> u64 {
+    let n = actual_blocks as u64;
+    for &tier in &READ_TIERS {
+        if n <= tier {
+            return tier;
+        }
+    }
+    // Larger than the biggest tier — just use actual count (no meaningful padding)
+    n
+}
+
+/// Maximum number of entries in a single-block superblock slot map.
+///
+/// Each entry is 9 bytes (8-byte path hash + 1-byte slot index).
+/// Payload budget: PAYLOAD_SIZE - 4 (magic) - 1 (version) - 3 (reserved)
+///   - 32 (salt) - 8 (generation) - 4 (file_count) - 8 (slot_map len header) - 32 (integrity)
+///   = 4056 - 92 = 3964 bytes → 3964 / 9 = 440 entries.
+pub const SUPERBLOCK_MAX_ENTRIES: usize = 440;

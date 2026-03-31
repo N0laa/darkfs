@@ -11,6 +11,8 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
+use fs2::FileExt;
+
 use crate::util::constants::BLOCK_SIZE;
 use crate::util::errors::{VoidError, VoidResult};
 
@@ -31,12 +33,16 @@ impl ImageFile {
         let file = OpenOptions::new().read(true).write(true).open(path)?;
         let size = file.metadata()?.len();
 
-        if size % BLOCK_SIZE as u64 != 0 {
+        if size == 0 || size % BLOCK_SIZE as u64 != 0 {
             return Err(VoidError::InvalidImageSize {
                 size,
                 block_size: BLOCK_SIZE,
             });
         }
+
+        // Acquire an exclusive advisory lock to prevent concurrent access.
+        // The lock is released automatically when the File is dropped.
+        file.try_lock_exclusive().map_err(|_| VoidError::ImageLocked)?;
 
         Ok(Self {
             file,

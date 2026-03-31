@@ -27,7 +27,7 @@ fn multiple_small_files_on_small_image() {
     for (path, expected) in &written {
         if let Some(data) = read_file(&mut img, &secret, path).unwrap() {
             assert_eq!(
-                std::str::from_utf8(&data).unwrap(),
+                std::str::from_utf8(&*data).unwrap(),
                 expected,
                 "file {path} has wrong content"
             );
@@ -52,6 +52,6 @@ fn overwrite_same_file() {
     write_file(&mut img, &secret, "/test.txt", b"version 1").unwrap();
     write_file(&mut img, &secret, "/test.txt", b"version 2").unwrap();
 
-    let data = read_file(&mut img, &secret, "/test.txt").unwrap();
-    assert_eq!(data.as_deref(), Some(b"version 2".as_slice()));
+    let data = read_file(&mut img, &secret, "/test.txt").unwrap().unwrap();
+    assert_eq!(&*data, b"version 2");
 }
