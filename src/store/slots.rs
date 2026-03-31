@@ -10,24 +10,42 @@
 //! XOR'd with a keyed CSPRNG stream so that every byte on disk is
 //! indistinguishable from random noise.
 
-use crate::crypto::cipher::{decrypt_block_masked, encrypt_block, encrypt_block_masked};
+use crate::crypto::cipher::{decrypt_block_masked, encrypt_block_masked};
+use zeroize::Zeroize;
 use crate::crypto::keys::derive_block_key;
 use crate::crypto::locator::block_offset;
 use crate::store::image::ImageFile;
 use crate::util::constants::{BLOCK_SIZE, MAX_SLOTS, PAYLOAD_SIZE};
 use crate::util::errors::{DarkError, DarkResult};
 
-/// Perform a dummy encryption to equalize timing with a successful decryption.
+/// Generate a ChaCha20 keystream to equalize timing with a successful decryption.
 ///
 /// When `decrypt_block_masked` fails (wrong key / random data), the crypto library
 /// short-circuits after Poly1305 tag verification WITHOUT running the ChaCha20
 /// keystream to decrypt the ciphertext. A successful decrypt does that extra work.
 ///
-/// This function runs `encrypt_block` on dummy data to compensate, ensuring both
-/// the success and failure paths do roughly the same amount of ChaCha20 computation.
+/// This function generates a ChaCha20 keystream of PAYLOAD_SIZE bytes (same work
+/// as a successful decrypt's keystream generation) WITHOUT Poly1305. Combined with
+/// the Poly1305 verify that already ran in the failed path, total work matches:
+///
+/// Success: void_unmask(ChaCha20) + AEAD_decrypt(ChaCha20 + Poly1305) = 2x ChaCha20 + 1x Poly1305
+/// Failure: void_unmask(ChaCha20) + AEAD_verify_fail(Poly1305) + equalize(ChaCha20) = 2x ChaCha20 + 1x Poly1305
 #[inline(never)]
 fn timing_equalize(key: &[u8; 32], dummy: &mut [u8; PAYLOAD_SIZE]) {
-    let _ = std::hint::black_box(encrypt_block(key, dummy));
+    // Use qsmm's ChaCha20 stream generator for the dummy keystream.
+    // This runs exactly the ChaCha20 computation that was skipped when
+    // AEAD verification failed (no Poly1305 involved).
+    let mask_key = qsmm::types::SecretKey::from_bytes(*key);
+    let stream = qsmm::void::entropy::generate_mask_stream(
+        &mask_key,
+        qsmm::types::BlockId(0),
+        PAYLOAD_SIZE,
+    );
+    // XOR into dummy to prevent optimizer from eliding the computation.
+    for (d, s) in dummy.iter_mut().zip(stream.iter()) {
+        *d ^= s;
+    }
+    std::hint::black_box(&*dummy);
 }
 
 /// Write an encrypted + void-masked block, resolving collisions across slots.
@@ -71,6 +89,8 @@ pub fn write_slot(
             }
         }
     }
+
+    dummy.zeroize();
 
     if let Some(offset) = own_slot.or(first_available) {
         let encrypted = encrypt_block_masked(&key, plaintext, master_secret, offset)?;
@@ -126,6 +146,8 @@ pub fn write_slot_cow(
             }
         }
     }
+
+    dummy.zeroize();
 
     match (own_slot, first_available) {
         (Some(old_offset), Some(new_offset)) => {
@@ -187,6 +209,8 @@ pub fn read_slot(
         }
     }
 
+    dummy.zeroize();
+
     Ok(found)
 }
 
@@ -235,6 +259,8 @@ pub fn erase_slot(
             }
         }
     }
+
+    dummy.zeroize();
 
     Ok(erased)
 }

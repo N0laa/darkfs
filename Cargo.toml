@@ -32,6 +32,7 @@ bincode = "1"
 qsmm = { path = "../qsmm", features = ["shatter", "void", "shield"] }
 rand = "0.8"
 zeroize = { version = "1", features = ["derive"] }
+subtle = "2"
 rpassword = "7"
 byteorder = "1"
 fs2 = "0.4"

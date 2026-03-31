@@ -17,7 +17,7 @@ use qsmm::shatter::mesh::{MeshConfig, MetadataMesh, RetrievedShard};
 use qsmm::shatter::sss;
 use qsmm::types::{SecretKey, Threshold};
 
-use crate::crypto::cipher::{decrypt_block, encrypt_block};
+use crate::crypto::cipher::{decrypt_block_masked, encrypt_block_masked};
 use crate::store::image::ImageFile;
 use crate::util::constants::PAYLOAD_SIZE;
 use crate::util::errors::{DarkError, DarkResult};
@@ -244,7 +244,8 @@ fn deserialize_superblock(master_secret: &[u8; 32], buf: &[u8]) -> Result<Superb
     // Verify integrity
     let expected = compute_integrity(master_secret, &buf[..pos]);
     let actual = &buf[pos..pos + 32];
-    if expected != actual {
+    use subtle::ConstantTimeEq;
+    if expected.ct_eq(actual).unwrap_u8() == 0 {
         return Err(DarkError::SuperblockCorrupt);
     }
 
@@ -278,6 +279,16 @@ pub fn read_superblock(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
 ) -> DarkResult<Option<Superblock>> {
+    // Minimum image size: need at least SHARD_N blocks for shards
+    // plus some blocks for file data.
+    const MIN_BLOCKS: u64 = (SHARD_N as u64) + 16; // 9 shards + 16 blocks minimum
+    if image.total_blocks() < MIN_BLOCKS {
+        return Err(DarkError::InvalidImageSize {
+            size: image.total_blocks() * crate::util::constants::BLOCK_SIZE as u64,
+            block_size: crate::util::constants::BLOCK_SIZE,
+        });
+    }
+
     let mesh = create_mesh(image.total_blocks());
     let key = derive_superblock_key(master_secret)?;
     let qsmm_key = to_qsmm_key(master_secret);
@@ -296,8 +307,8 @@ pub fn read_superblock(
             Err(_) => continue,
         };
 
-        // Try to decrypt the shard block.
-        let payload = match decrypt_block(&key, &raw) {
+        // Try to void-unmask and decrypt the shard block.
+        let payload = match decrypt_block_masked(&key, &raw, master_secret, offset) {
             Ok(p) => p,
             Err(_) => continue, // Not a valid shard — skip.
         };
@@ -351,6 +362,16 @@ pub fn write_superblock(
     master_secret: &[u8; 32],
     sb: &Superblock,
 ) -> DarkResult<()> {
+    // Minimum image size: need at least SHARD_N blocks for shards
+    // plus some blocks for file data.
+    const MIN_BLOCKS: u64 = (SHARD_N as u64) + 16; // 9 shards + 16 blocks minimum
+    if image.total_blocks() < MIN_BLOCKS {
+        return Err(DarkError::InvalidImageSize {
+            size: image.total_blocks() * crate::util::constants::BLOCK_SIZE as u64,
+            block_size: crate::util::constants::BLOCK_SIZE,
+        });
+    }
+
     let mesh = create_mesh(image.total_blocks());
     let key = derive_superblock_key(master_secret)?;
     let qsmm_key = to_qsmm_key(master_secret);
@@ -380,9 +401,24 @@ pub fn write_superblock(
         payload[..4].copy_from_slice(&share_len.to_le_bytes());
         payload[4..4 + share_bytes.len()].copy_from_slice(share_bytes);
 
-        let encrypted = encrypt_block(&key, &payload)?;
+        let encrypted = encrypt_block_masked(&key, &payload, master_secret, offset)?;
         image.write_block(offset, &encrypted)?;
         image.claim_offset(offset);
+    }
+
+    // DA-7: Write decoy blocks to mask shard positions in multi-snapshot analysis.
+    // Without decoys, an adversary can identify the 9 shard positions by observing
+    // which blocks change on every superblock update.
+    let total = image.total_blocks();
+    let decoy_count = 7u64;
+    let mut rng = rand::thread_rng();
+    for _ in 0..decoy_count {
+        let idx = rand::Rng::gen_range(&mut rng, 0..total);
+        if !image.is_offset_claimed(idx) {
+            let mut noise = [0u8; crate::util::constants::BLOCK_SIZE];
+            rand::RngCore::fill_bytes(&mut rng, &mut noise);
+            let _ = image.write_block(idx, &noise);
+        }
     }
 
     Ok(())

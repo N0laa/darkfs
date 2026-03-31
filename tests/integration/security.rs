@@ -8,7 +8,7 @@
 
 use rand::RngCore;
 
-use darkfs::crypto::cipher::decrypt_block;
+use darkfs::crypto::cipher::decrypt_block_masked;
 use darkfs::crypto::kdf::{derive_master_secret, KdfPreset};
 use darkfs::crypto::keys::derive_block_key;
 use darkfs::crypto::locator::{block_offset, canonical_path};
@@ -86,7 +86,7 @@ fn same_content_same_key_produces_different_blocks() {
     for slot in 0..MAX_SLOTS {
         let off = block_offset(&secret, &canon, 0, slot, total);
         let raw = img.read_block(off).unwrap();
-        if decrypt_block(&key, &raw).is_ok() {
+        if decrypt_block_masked(&key, &raw, &secret, off).is_ok() {
             block_before = Some(raw);
             break;
         }
@@ -100,7 +100,7 @@ fn same_content_same_key_produces_different_blocks() {
     for slot in 0..MAX_SLOTS {
         let off = block_offset(&secret, &canon, 0, slot, total);
         let raw = img.read_block(off).unwrap();
-        if decrypt_block(&key, &raw).is_ok() {
+        if decrypt_block_masked(&key, &raw, &secret, off).is_ok() {
             block_after = Some(raw);
             break;
         }
@@ -300,7 +300,7 @@ fn corrupted_block_returns_error_not_panic() {
     for slot in 0..MAX_SLOTS {
         let off = block_offset(&secret, &canon, 2, slot, total);
         let raw = img.read_block(off).unwrap();
-        if decrypt_block(&key, &raw).is_ok() {
+        if decrypt_block_masked(&key, &raw, &secret, off).is_ok() {
             let mut garbage = [0u8; BLOCK_SIZE];
             rand::thread_rng().fill_bytes(&mut garbage);
             img.write_block(off, &garbage).unwrap();
@@ -339,7 +339,7 @@ fn ciphertext_bytes_show_no_bias_at_magic_positions() {
         for slot in 0..MAX_SLOTS {
             let off = block_offset(&secret, &canon, 0, slot, total);
             let raw = img.read_block(off).unwrap();
-            if decrypt_block(&key, &raw).is_ok() {
+            if decrypt_block_masked(&key, &raw, &secret, off).is_ok() {
                 let mut bytes = [0u8; 8];
                 bytes.copy_from_slice(&raw[NONCE_SIZE..NONCE_SIZE + 8]);
                 samples.push(bytes);

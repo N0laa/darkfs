@@ -419,6 +419,7 @@ dependencies = [
  "rpassword",
  "serde",
  "sha2",
+ "subtle",
  "tempfile",
  "thiserror",
  "zeroize",
