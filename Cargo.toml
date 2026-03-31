@@ -29,6 +29,7 @@ sha2 = "0.10"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 bincode = "1"
+qsmm = { path = "../qsmm", features = ["shatter", "void", "shield"] }
 rand = "0.8"
 zeroize = { version = "1", features = ["derive"] }
 rpassword = "7"

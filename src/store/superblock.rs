@@ -1,23 +1,21 @@
-//! Encrypted superblock: per-image salt, generation counter, and slot map.
+//! Sharded metadata mesh: per-image salt, generation counter, and slot map.
 //!
-//! The superblock is a single encrypted block at an HMAC-derived offset,
-//! indistinguishable from random data without the passphrase. It stores:
+//! Instead of a single encrypted superblock, metadata is split into
+//! threshold-recoverable shards via QSMM's shatter module. The shards
+//! are scattered across the image at HMAC-derived positions, invisible
+//! without the passphrase.
 //!
-//! - **`random_salt`**: 32-byte per-image nonce, generated once on first use.
-//!   Mixed into session key derivation to prevent cross-image key reuse.
-//! - **`generation`**: Monotonic counter incremented on each write session.
-//!   Enables replay detection (a rolled-back image has a lower generation).
-//! - **`slot_map`**: Maps file path hashes to their slot indices, enabling
-//!   O(1) slot lookup instead of O(MAX_SLOTS) scanning on reads.
-//!
-//! The superblock is encrypted with a key derived from `master_secret` (not
-//! `session_secret`), since the superblock must be readable before the
-//! session secret can be derived.
+//! - **Fault tolerant**: Need only 5 of 9 shards to reconstruct.
+//! - **No decoys needed**: Every shard looks like random noise.
+//! - **No single point of failure**: Losing up to 4 shards is safe.
 
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use zeroize::Zeroizing;
-use hkdf::Hkdf;
+
+use qsmm::shatter::mesh::{MeshConfig, MetadataMesh, RetrievedShard};
+use qsmm::shatter::sss;
+use qsmm::types::{SecretKey, Threshold};
 
 use crate::crypto::cipher::{decrypt_block, encrypt_block};
 use crate::store::image::ImageFile;
@@ -26,11 +24,16 @@ use crate::util::errors::{DarkError, DarkResult};
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Magic bytes for superblock identification after decryption: "VFS0".
-const SB_MAGIC: [u8; 4] = [0x56, 0x46, 0x53, 0x30];
+/// Shard threshold: need K of N shards to reconstruct.
+const SHARD_K: usize = 5;
+/// Total shards written.
+const SHARD_N: usize = 9;
+
+/// Magic bytes for superblock identification after decryption: "DFS1".
+const SB_MAGIC: [u8; 4] = [0x44, 0x46, 0x53, 0x31];
 
 /// Current superblock format version.
-const SB_VERSION: u8 = 1;
+const SB_VERSION: u8 = 2;
 
 /// Fixed header size inside the superblock payload.
 /// [4 magic] [1 version] [3 reserved] [32 salt] [8 generation] [4 file_count] = 52 bytes
@@ -84,13 +87,18 @@ impl Superblock {
 
     /// Record a slot assignment for a file block.
     pub fn record_slot(&mut self, path_hash: u64, block_num: u32, slot: u8) {
-        // Update existing entry or add new one
-        if let Some(entry) = self.slot_map.iter_mut().find(
-            |e| e.path_hash == path_hash && e.block_num == block_num,
-        ) {
+        if let Some(entry) = self
+            .slot_map
+            .iter_mut()
+            .find(|e| e.path_hash == path_hash && e.block_num == block_num)
+        {
             entry.slot = slot;
         } else {
-            self.slot_map.push(SlotEntry { path_hash, block_num, slot });
+            self.slot_map.push(SlotEntry {
+                path_hash,
+                block_num,
+                slot,
+            });
         }
     }
 
@@ -113,19 +121,9 @@ impl Superblock {
     }
 }
 
-/// Compute the disk offset where the superblock is stored.
-pub fn superblock_offset(master_secret: &[u8; 32], total_blocks: u64) -> u64 {
-    let mut mac = HmacSha256::new_from_slice(master_secret)
-        .expect("HMAC accepts any key length");
-    mac.update(b"darkfs-superblock");
-    let result = mac.finalize().into_bytes();
-    let hash_bytes: [u8; 8] = result[..8].try_into().expect("8 bytes");
-    u64::from_le_bytes(hash_bytes) % total_blocks
-}
-
-/// Derive the encryption key used for the superblock (distinct from file keys).
+/// Derive the encryption key used for superblock shard encryption.
 fn derive_superblock_key(master_secret: &[u8; 32]) -> Result<Zeroizing<[u8; 32]>, DarkError> {
-    let hkdf = Hkdf::<Sha256>::new(Some(master_secret), master_secret);
+    let hkdf = hkdf::Hkdf::<Sha256>::new(Some(master_secret), master_secret);
     let mut key = Zeroizing::new([0u8; 32]);
     hkdf.expand(b"darkfs-superblock-key", key.as_mut())
         .map_err(|e| DarkError::Kdf(format!("HKDF expand (superblock): {e}")))?;
@@ -134,8 +132,8 @@ fn derive_superblock_key(master_secret: &[u8; 32]) -> Result<Zeroizing<[u8; 32]>
 
 /// Compute HMAC integrity over the superblock fields.
 fn compute_integrity(master_secret: &[u8; 32], data: &[u8]) -> [u8; 32] {
-    let mut mac = HmacSha256::new_from_slice(master_secret)
-        .expect("HMAC accepts any key length");
+    let mut mac =
+        HmacSha256::new_from_slice(master_secret).expect("HMAC accepts any key length");
     mac.update(b"darkfs-superblock-integrity");
     mac.update(data);
     let result = mac.finalize().into_bytes();
@@ -144,28 +142,27 @@ fn compute_integrity(master_secret: &[u8; 32], data: &[u8]) -> [u8; 32] {
     out
 }
 
-/// Serialize the superblock into a PAYLOAD_SIZE buffer.
+/// Serialize the superblock into bytes.
 fn serialize_superblock(
     master_secret: &[u8; 32],
     sb: &Superblock,
-) -> Result<[u8; PAYLOAD_SIZE], DarkError> {
+) -> Result<Vec<u8>, DarkError> {
     if sb.slot_map.len() > MAX_SLOT_ENTRIES {
         return Err(DarkError::SuperblockFull {
             max_entries: MAX_SLOT_ENTRIES,
         });
     }
 
-    let mut buf = [0u8; PAYLOAD_SIZE];
+    let mut buf = vec![0u8; SB_HEADER_SIZE + 4 + sb.slot_map.len() * SLOT_ENTRY_SIZE + INTEGRITY_SIZE];
     let mut pos = 0;
 
-    // Header: magic + version + reserved
+    // Header
     buf[pos..pos + 4].copy_from_slice(&SB_MAGIC);
     pos += 4;
     buf[pos] = SB_VERSION;
     pos += 1;
     pos += 3; // reserved
 
-    // Salt, generation, file_count
     buf[pos..pos + 32].copy_from_slice(&sb.random_salt);
     pos += 32;
     buf[pos..pos + 8].copy_from_slice(&sb.generation.to_le_bytes());
@@ -173,7 +170,7 @@ fn serialize_superblock(
     buf[pos..pos + 4].copy_from_slice(&sb.file_count.to_le_bytes());
     pos += 4;
 
-    // Slot map: count + entries
+    // Slot map
     let entry_count = sb.slot_map.len() as u32;
     buf[pos..pos + 4].copy_from_slice(&entry_count.to_le_bytes());
     pos += 4;
@@ -187,45 +184,43 @@ fn serialize_superblock(
         pos += 1;
     }
 
-    // Integrity HMAC over everything before it
+    // Integrity HMAC
     let integrity = compute_integrity(master_secret, &buf[..pos]);
     buf[pos..pos + 32].copy_from_slice(&integrity);
 
     Ok(buf)
 }
 
-/// Deserialize and validate a superblock from a PAYLOAD_SIZE buffer.
+/// Deserialize and validate a superblock from bytes.
 fn deserialize_superblock(
     master_secret: &[u8; 32],
-    buf: &[u8; PAYLOAD_SIZE],
+    buf: &[u8],
 ) -> Result<Superblock, DarkError> {
+    if buf.len() < SB_HEADER_SIZE + 4 + INTEGRITY_SIZE {
+        return Err(DarkError::SuperblockCorrupt);
+    }
+
     let mut pos = 0;
 
-    // Check magic
     if buf[pos..pos + 4] != SB_MAGIC {
         return Err(DarkError::InvalidMagic);
     }
     pos += 4;
 
-    // Version
     let _version = buf[pos];
     pos += 1;
     pos += 3; // reserved
 
-    // Salt
     let mut random_salt = [0u8; 32];
     random_salt.copy_from_slice(&buf[pos..pos + 32]);
     pos += 32;
 
-    // Generation
     let generation = u64::from_le_bytes(buf[pos..pos + 8].try_into().unwrap());
     pos += 8;
 
-    // File count
     let file_count = u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap());
     pos += 4;
 
-    // Slot map
     let entry_count = u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap()) as usize;
     pos += 4;
 
@@ -235,7 +230,7 @@ fn deserialize_superblock(
 
     let mut slot_map = Vec::with_capacity(entry_count);
     for _ in 0..entry_count {
-        if pos + SLOT_ENTRY_SIZE > PAYLOAD_SIZE - INTEGRITY_SIZE {
+        if pos + SLOT_ENTRY_SIZE > buf.len() - INTEGRITY_SIZE {
             return Err(DarkError::SuperblockCorrupt);
         }
         let path_hash = u64::from_le_bytes(buf[pos..pos + 8].try_into().unwrap());
@@ -244,7 +239,11 @@ fn deserialize_superblock(
         pos += 4;
         let slot = buf[pos];
         pos += 1;
-        slot_map.push(SlotEntry { path_hash, block_num, slot });
+        slot_map.push(SlotEntry {
+            path_hash,
+            block_num,
+            slot,
+        });
     }
 
     // Verify integrity
@@ -262,102 +261,137 @@ fn deserialize_superblock(
     })
 }
 
-/// Read and decrypt the superblock from the image.
+/// Create the QSMM metadata mesh for this image.
+fn create_mesh(total_blocks: u64) -> MetadataMesh {
+    MetadataMesh::new(MeshConfig {
+        threshold: Threshold::new(SHARD_K, SHARD_N),
+        total_blocks,
+    })
+}
+
+/// Convert master_secret to a QSMM SecretKey.
+fn to_qsmm_key(master_secret: &[u8; 32]) -> SecretKey {
+    SecretKey::from_bytes(*master_secret)
+}
+
+/// Read and reconstruct the superblock from sharded mesh.
 ///
-/// Returns `Ok(None)` if no superblock exists (fresh image or wrong passphrase).
+/// Scans 9 HMAC-derived shard positions, decrypts each, and reconstructs
+/// the superblock from 5+ valid shards. Returns `Ok(None)` if fewer than
+/// 5 shards are recoverable (fresh image or wrong passphrase).
 pub fn read_superblock(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
 ) -> DarkResult<Option<Superblock>> {
-    let offset = superblock_offset(master_secret, image.total_blocks());
-    let raw = image.read_block(offset)?;
-
+    let mesh = create_mesh(image.total_blocks());
     let key = derive_superblock_key(master_secret)?;
-    let payload = match decrypt_block(&key, &raw) {
-        Ok(p) => p,
-        Err(DarkError::Decrypt) => return Ok(None), // no superblock yet
-        Err(e) => return Err(e),
+    let qsmm_key = to_qsmm_key(master_secret);
+    let hw_entropy = b"darkfs-mesh-entropy";
+
+    let shard_locations = mesh.shard_locations(&qsmm_key, hw_entropy);
+
+    // Try to read and decrypt each shard.
+    let mut retrieved_shards: Vec<RetrievedShard> = Vec::new();
+
+    for &block_id in shard_locations.iter() {
+        let offset = block_id.0;
+
+        let raw = match image.read_block(offset) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        // Try to decrypt the shard block.
+        let payload = match decrypt_block(&key, &raw) {
+            Ok(p) => p,
+            Err(_) => continue, // Not a valid shard — skip.
+        };
+
+        // Extract the sss::Share from the payload.
+        // Format: [4-byte share_len | share_data | zero padding]
+        if payload.len() < 4 {
+            continue;
+        }
+        let share_len = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+        if share_len == 0 || 4 + share_len > payload.len() {
+            continue;
+        }
+        let share_data = payload[4..4 + share_len].to_vec();
+
+        retrieved_shards.push(RetrievedShard {
+            share: sss::Share::from_bytes(share_data),
+            source_block: block_id,
+        });
+
+        // Claim offset so file writes don't overwrite our shard.
+        image.claim_offset(offset);
+    }
+
+    // Need at least SHARD_K shards to reconstruct.
+    if retrieved_shards.len() < SHARD_K {
+        return Ok(None);
+    }
+
+    // Reconstruct the serialized superblock from shards.
+    let serialized = match mesh.reconstruct_metadata(&retrieved_shards) {
+        Ok(data) => data,
+        Err(_) => return Ok(None),
     };
 
-    match deserialize_superblock(master_secret, &payload) {
-        Ok(sb) => {
-            // Claim the superblock offset to prevent file writes from overwriting it
-            image.claim_offset(offset);
-            Ok(Some(sb))
-        }
+    // Deserialize.
+    match deserialize_superblock(master_secret, &serialized) {
+        Ok(sb) => Ok(Some(sb)),
         Err(DarkError::InvalidMagic) => Ok(None),
         Err(e) => Err(e),
     }
 }
 
-/// Number of deterministic decoy blocks written alongside each superblock update.
-const DECOY_WRITE_COUNT: usize = 7;
-
-/// Compute deterministic decoy offsets derived from master_secret.
+/// Shard, encrypt, and write the superblock to the image.
 ///
-/// These are fixed per-image so that the SAME set of blocks changes on every
-/// superblock write. An adversary diffing snapshots sees `1 + DECOY_WRITE_COUNT`
-/// blocks that change every time — they cannot distinguish the superblock from
-/// the decoys without the passphrase.
-fn decoy_offsets(master_secret: &[u8; 32], total_blocks: u64) -> Vec<u64> {
-    let sb_off = superblock_offset(master_secret, total_blocks);
-    let mut offsets = Vec::with_capacity(DECOY_WRITE_COUNT);
-    for i in 0u32..DECOY_WRITE_COUNT as u32 * 4 {
-        if offsets.len() >= DECOY_WRITE_COUNT {
-            break;
-        }
-        let mut mac = HmacSha256::new_from_slice(master_secret)
-            .expect("HMAC accepts any key length");
-        mac.update(b"darkfs-decoy");
-        mac.update(&i.to_le_bytes());
-        let result = mac.finalize().into_bytes();
-        let hash_bytes: [u8; 8] = result[..8].try_into().expect("8 bytes");
-        let off = u64::from_le_bytes(hash_bytes) % total_blocks;
-        if off != sb_off && !offsets.contains(&off) {
-            offsets.push(off);
-        }
-    }
-    offsets
-}
-
-/// Encrypt and write the superblock to the image, plus deterministic decoy blocks.
-///
-/// Writes `DECOY_WRITE_COUNT` random-data blocks to deterministic offsets
-/// derived from `master_secret`, so that snapshot diffs see multiple blocks
-/// changing every time and cannot identify which one is the superblock.
+/// Serializes the superblock, splits it into 9 shards (needing 5 to
+/// reconstruct), encrypts each shard, and writes them to HMAC-derived
+/// positions across the image.
 pub fn write_superblock(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
     sb: &Superblock,
 ) -> DarkResult<()> {
-    let offset = superblock_offset(master_secret, image.total_blocks());
+    let mesh = create_mesh(image.total_blocks());
     let key = derive_superblock_key(master_secret)?;
-    let payload = serialize_superblock(master_secret, sb)?;
-    let encrypted = encrypt_block(&key, &payload)?;
-    image.write_block(offset, &encrypted)?;
-    image.claim_offset(offset);
+    let qsmm_key = to_qsmm_key(master_secret);
+    let hw_entropy = b"darkfs-mesh-entropy";
 
-    // Write decoy blocks at deterministic (but secret) offsets.
-    let total = image.total_blocks();
-    let decoys = decoy_offsets(master_secret, total);
-    let mut rng = rand::thread_rng();
-    for idx in decoys {
-        if !image.is_offset_claimed(idx) {
-            let mut noise = [0u8; crate::util::constants::BLOCK_SIZE];
-            rand::RngCore::fill_bytes(&mut rng, &mut noise);
-            let _ = image.write_block(idx, &noise);
-        }
+    // Serialize the superblock.
+    let serialized = serialize_superblock(master_secret, sb)?;
+
+    // Shard it via QSMM.
+    let placements = mesh
+        .shard_metadata(&serialized, &qsmm_key, hw_entropy)
+        .map_err(|e| DarkError::Io(std::io::Error::new(std::io::ErrorKind::Other, format!("mesh shard failed: {e}"))))?;
+
+    // Encrypt and write each shard.
+    for placement in &placements {
+        let offset = placement.target_block.0;
+        let share_bytes = placement.share.to_bytes();
+
+        // Pack share into a PAYLOAD_SIZE buffer: [4-byte len | share_data | zero padding]
+        let mut payload = [0u8; PAYLOAD_SIZE];
+        let share_len = share_bytes.len() as u32;
+        payload[..4].copy_from_slice(&share_len.to_le_bytes());
+        payload[4..4 + share_bytes.len()].copy_from_slice(share_bytes);
+
+        let encrypted = encrypt_block(&key, &payload)?;
+        image.write_block(offset, &encrypted)?;
+        image.claim_offset(offset);
     }
 
     Ok(())
 }
 
 /// Compute a path hash for the slot map.
-///
-/// Returns the first 8 bytes of HMAC-SHA256(secret, canonical_path) as u64.
 pub fn path_hash(secret: &[u8; 32], canonical_path: &str) -> u64 {
-    let mut mac = HmacSha256::new_from_slice(secret)
-        .expect("HMAC accepts any key length");
+    let mut mac =
+        HmacSha256::new_from_slice(secret).expect("HMAC accepts any key length");
     mac.update(b"darkfs-path-hash");
     mac.update(canonical_path.as_bytes());
     let result = mac.finalize().into_bytes();
@@ -427,25 +461,77 @@ mod tests {
     fn integrity_detects_tampering() {
         let master = [42u8; 32];
         let sb = Superblock::new();
-        let mut payload = serialize_superblock(&master, &sb).unwrap();
+        let mut serialized = serialize_superblock(&master, &sb).unwrap();
 
-        // Tamper with the generation field (offset 44 = 4+1+3+32+8 minus 4 = byte 44)
-        payload[44] ^= 0xFF;
+        // Tamper with a byte in the salt region.
+        serialized[10] ^= 0xFF;
 
-        let result = deserialize_superblock(&master, &payload);
+        let result = deserialize_superblock(&master, &serialized);
         assert!(matches!(result, Err(DarkError::SuperblockCorrupt)));
     }
 
     #[test]
-    fn superblock_offset_claims_block() {
+    fn shards_claim_offsets() {
         let (_tmp, mut img) = create_test_image(256);
         let master = [42u8; 32];
 
         let sb = Superblock::new();
         write_superblock(&mut img, &master, &sb).unwrap();
 
-        let offset = superblock_offset(&master, img.total_blocks());
-        assert!(img.is_offset_claimed(offset));
+        // All 9 shard positions should be claimed.
+        let mesh = create_mesh(img.total_blocks());
+        let locations = mesh.shard_locations(&to_qsmm_key(&master), b"darkfs-mesh-entropy");
+        for loc in &locations {
+            assert!(
+                img.is_offset_claimed(loc.0),
+                "shard at offset {} should be claimed",
+                loc.0
+            );
+        }
+    }
+
+    #[test]
+    fn survives_corrupted_shards() {
+        let (_tmp, mut img) = create_test_image(256);
+        let master = [42u8; 32];
+
+        let mut sb = Superblock::new();
+        sb.generation = 42;
+        sb.file_count = 7;
+        write_superblock(&mut img, &master, &sb).unwrap();
+
+        // Corrupt 4 of 9 shards (should still reconstruct from remaining 5).
+        let mesh = create_mesh(img.total_blocks());
+        let locations = mesh.shard_locations(&to_qsmm_key(&master), b"darkfs-mesh-entropy");
+        let mut noise = [0u8; BLOCK_SIZE];
+        for loc in locations.iter().take(4) {
+            rand::thread_rng().fill_bytes(&mut noise);
+            img.write_block(loc.0, &noise).unwrap();
+        }
+
+        let read_back = read_superblock(&mut img, &master).unwrap().unwrap();
+        assert_eq!(read_back.generation, 42);
+        assert_eq!(read_back.file_count, 7);
+    }
+
+    #[test]
+    fn five_corrupted_shards_returns_none() {
+        let (_tmp, mut img) = create_test_image(256);
+        let master = [42u8; 32];
+
+        let sb = Superblock::new();
+        write_superblock(&mut img, &master, &sb).unwrap();
+
+        // Corrupt 5 of 9 shards — only 4 remain, below threshold.
+        let mesh = create_mesh(img.total_blocks());
+        let locations = mesh.shard_locations(&to_qsmm_key(&master), b"darkfs-mesh-entropy");
+        let mut noise = [0u8; BLOCK_SIZE];
+        for loc in locations.iter().take(5) {
+            rand::thread_rng().fill_bytes(&mut noise);
+            img.write_block(loc.0, &noise).unwrap();
+        }
+
+        assert!(read_superblock(&mut img, &master).unwrap().is_none());
     }
 
     #[test]
@@ -461,11 +547,9 @@ mod tests {
         assert_eq!(sb.lookup_slot(222, 0), Some(1));
         assert_eq!(sb.lookup_slot(999, 0), None);
 
-        // Update existing
         sb.record_slot(111, 0, 4);
         assert_eq!(sb.lookup_slot(111, 0), Some(4));
 
-        // Remove
         sb.remove_path(111);
         assert_eq!(sb.lookup_slot(111, 0), None);
         assert_eq!(sb.lookup_slot(111, 1), None);
@@ -475,16 +559,12 @@ mod tests {
     #[test]
     fn path_hash_deterministic() {
         let secret = [42u8; 32];
-        let h1 = path_hash(&secret, "/foo");
-        let h2 = path_hash(&secret, "/foo");
-        assert_eq!(h1, h2);
+        assert_eq!(path_hash(&secret, "/foo"), path_hash(&secret, "/foo"));
     }
 
     #[test]
     fn path_hash_differs_for_different_paths() {
         let secret = [42u8; 32];
-        let h1 = path_hash(&secret, "/foo");
-        let h2 = path_hash(&secret, "/bar");
-        assert_ne!(h1, h2);
+        assert_ne!(path_hash(&secret, "/foo"), path_hash(&secret, "/bar"));
     }
 }
