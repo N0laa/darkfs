@@ -17,7 +17,7 @@ use zeroize::Zeroizing;
 use crate::fs::directory::FileType as VoidFileType;
 use crate::fs::file::{read_file, write_file};
 use crate::fs::ops::{self, list_dir};
-use crate::fs::path::{filename_of, parent_of};
+use crate::fs::path::{filename_of, join_path, parent_of};
 use crate::store::image::ImageFile;
 use crate::store::superblock::{write_superblock, Superblock};
 use crate::util::constants::BLOCK_SIZE;
@@ -345,11 +345,7 @@ impl Filesystem for VoidFsHandler {
                 (ino, FileType::Directory, "..".to_string()),
             ];
             for entry in &dir_idx.entries {
-                let child = if path == "/" {
-                    format!("/{}", entry.name)
-                } else {
-                    format!("{}/{}", path, entry.name)
-                };
+                let child = join_path(&path, &entry.name);
                 let child_ino = self.assign_ino(child);
                 let kind = match entry.entry_type {
                     VoidFileType::File => FileType::RegularFile,

@@ -16,7 +16,6 @@
 
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
-use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 use hkdf::Hkdf;
 
@@ -54,7 +53,7 @@ pub struct Superblock {
 }
 
 /// A single entry in the superblock slot map.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SlotEntry {
     /// First 8 bytes of HMAC(session_secret, canonical_path), as u64.
     pub path_hash: u64,

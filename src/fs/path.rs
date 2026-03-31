@@ -42,6 +42,22 @@ pub fn filename_of(canonical: &str) -> &str {
     }
 }
 
+/// Join a parent directory path with a child name.
+///
+/// ```
+/// # use voidfs::fs::path::join_path;
+/// assert_eq!(join_path("/", "foo"), "/foo");
+/// assert_eq!(join_path("/a", "b"), "/a/b");
+/// assert_eq!(join_path("/a/b", "c"), "/a/b/c");
+/// ```
+pub fn join_path(parent: &str, name: &str) -> String {
+    if parent == "/" {
+        format!("/{name}")
+    } else {
+        format!("{parent}/{name}")
+    }
+}
+
 /// Return the path to the `.dirindex` file for a directory.
 ///
 /// ```
@@ -86,6 +102,17 @@ mod tests {
     #[test]
     fn filename_of_nested() {
         assert_eq!(filename_of("/foo/bar.txt"), "bar.txt");
+    }
+
+    #[test]
+    fn join_path_root_parent() {
+        assert_eq!(join_path("/", "foo"), "/foo");
+    }
+
+    #[test]
+    fn join_path_nested() {
+        assert_eq!(join_path("/a", "b"), "/a/b");
+        assert_eq!(join_path("/a/b", "c"), "/a/b/c");
     }
 
     #[test]

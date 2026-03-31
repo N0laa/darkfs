@@ -10,7 +10,7 @@ use crate::crypto::locator::block_offset;
 use crate::fs::directory::{read_dirindex, write_dirindex, DirIndex, FileType};
 use crate::fs::file::{read_file, write_file};
 use crate::fs::inode::FileHeader;
-use crate::fs::path::{canonical_path, dirindex_path, filename_of, parent_of};
+use crate::fs::path::{canonical_path, dirindex_path, filename_of, join_path, parent_of};
 use crate::store::image::ImageFile;
 use crate::store::slots::{erase_slot, read_slot};
 use crate::util::constants::{HEADER_SIZE, MAX_SLOTS};
@@ -58,8 +58,8 @@ pub fn create_file(
 
 /// Read a file's data. Returns `None` if the file doesn't exist.
 ///
-/// The returned data is wrapped in [`Zeroizing`] so that plaintext is securely
-/// erased from memory when the value is dropped.
+/// This is a convenience wrapper around [`read_file`] that applies path
+/// canonicalization. Prefer calling [`read_file`] directly for new code.
 pub fn read_file_data(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
@@ -254,11 +254,7 @@ fn walk_dir_for_info(
     let dir_idx = read_dirindex(image, master_secret, dir)?;
 
     for entry in &dir_idx.entries {
-        let child_path = if dir == "/" {
-            format!("/{}", entry.name)
-        } else {
-            format!("{dir}/{}", entry.name)
-        };
+        let child_path = join_path(dir, &entry.name);
 
         match entry.entry_type {
             FileType::File => {
@@ -297,11 +293,7 @@ fn walk_dir_for_tree(
     let dir_idx = read_dirindex(image, master_secret, dir)?;
 
     for entry in &dir_idx.entries {
-        let child_path = if dir == "/" {
-            format!("/{}", entry.name)
-        } else {
-            format!("{dir}/{}", entry.name)
-        };
+        let child_path = join_path(dir, &entry.name);
 
         match entry.entry_type {
             FileType::File => {
@@ -346,11 +338,7 @@ fn walk_dir_for_claims(
     let dir_idx = read_dirindex(image, master_secret, dir)?;
 
     for entry in &dir_idx.entries {
-        let child_path = if dir == "/" {
-            format!("/{}", entry.name)
-        } else {
-            format!("{dir}/{}", entry.name)
-        };
+        let child_path = join_path(dir, &entry.name);
 
         match entry.entry_type {
             FileType::File => {
@@ -409,11 +397,7 @@ pub fn rmdir_recursive(
 
     // Delete all entries
     for entry in &dir_idx.entries {
-        let child_path = if canon == "/" {
-            format!("/{}", entry.name)
-        } else {
-            format!("{}/{}", canon, entry.name)
-        };
+        let child_path = join_path(&canon, &entry.name);
 
         match entry.entry_type {
             FileType::File => {

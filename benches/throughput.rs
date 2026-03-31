@@ -1,3 +1,7 @@
+//! Throughput benchmarks for voidfs cryptographic primitives and file I/O.
+//!
+//! Run with: `cargo bench`
+
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use rand::RngCore;
 use tempfile::NamedTempFile;
