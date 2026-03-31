@@ -64,9 +64,13 @@ pub fn decrypt_block_masked(
 ) -> Result<[u8; PAYLOAD_SIZE], DarkError> {
     // Void-unmask.
     let qsmm_key = SecretKey::from_bytes(*master_secret);
-    let unmasked =
-        mask::unmask_block(masked_block, &qsmm_key, BlockId(block_offset), VOID_HW_ENTROPY)
-            .map_err(|_| DarkError::Decrypt)?;
+    let unmasked = mask::unmask_block(
+        masked_block,
+        &qsmm_key,
+        BlockId(block_offset),
+        VOID_HW_ENTROPY,
+    )
+    .map_err(|_| DarkError::Decrypt)?;
 
     let mut block = [0u8; BLOCK_SIZE];
     block.copy_from_slice(&unmasked);
@@ -103,9 +107,8 @@ pub fn decrypt_block(
     key: &[u8; 32],
     block: &[u8; BLOCK_SIZE],
 ) -> Result<[u8; PAYLOAD_SIZE], DarkError> {
-    let nonce_bytes: [u8; NONCE_SIZE] = block[..NONCE_SIZE]
-        .try_into()
-        .expect("slice is NONCE_SIZE");
+    let nonce_bytes: [u8; NONCE_SIZE] =
+        block[..NONCE_SIZE].try_into().expect("slice is NONCE_SIZE");
     let xnonce = XNonce::from_slice(&nonce_bytes);
 
     let cipher = XChaCha20Poly1305::new(key.into());
@@ -139,7 +142,10 @@ mod tests {
 
         let encrypted = encrypt_block(&key, &plaintext).unwrap();
         assert_eq!(encrypted.len(), BLOCK_SIZE);
-        assert_ne!(&encrypted[NONCE_SIZE..NONCE_SIZE + PAYLOAD_SIZE], &plaintext[..]);
+        assert_ne!(
+            &encrypted[NONCE_SIZE..NONCE_SIZE + PAYLOAD_SIZE],
+            &plaintext[..]
+        );
 
         let decrypted = decrypt_block(&key, &encrypted).unwrap();
         assert_eq!(decrypted, plaintext);
@@ -152,7 +158,10 @@ mod tests {
         let encrypted = encrypt_block(&key, &plaintext).unwrap();
 
         let wrong_key = [99u8; 32];
-        assert!(matches!(decrypt_block(&wrong_key, &encrypted), Err(DarkError::Decrypt)));
+        assert!(matches!(
+            decrypt_block(&wrong_key, &encrypted),
+            Err(DarkError::Decrypt)
+        ));
     }
 
     #[test]
@@ -161,7 +170,10 @@ mod tests {
         let plaintext = random_payload();
         let mut encrypted = encrypt_block(&key, &plaintext).unwrap();
         encrypted[NONCE_SIZE] ^= 0xFF;
-        assert!(matches!(decrypt_block(&key, &encrypted), Err(DarkError::Decrypt)));
+        assert!(matches!(
+            decrypt_block(&key, &encrypted),
+            Err(DarkError::Decrypt)
+        ));
     }
 
     #[test]
@@ -169,7 +181,10 @@ mod tests {
         let key = [42u8; 32];
         let mut random_block = [0u8; BLOCK_SIZE];
         rand::thread_rng().fill_bytes(&mut random_block);
-        assert!(matches!(decrypt_block(&key, &random_block), Err(DarkError::Decrypt)));
+        assert!(matches!(
+            decrypt_block(&key, &random_block),
+            Err(DarkError::Decrypt)
+        ));
     }
 
     #[test]

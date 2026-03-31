@@ -1,7 +1,7 @@
-use rand::RngCore;
-use tempfile::NamedTempFile;
 use darkfs::store::image::ImageFile;
 use darkfs::util::constants::BLOCK_SIZE;
+use rand::RngCore;
+use tempfile::NamedTempFile;
 
 /// Create a temporary image file filled with random data, simulating `mkdark`.
 pub fn create_random_image(num_blocks: u64) -> (NamedTempFile, ImageFile) {

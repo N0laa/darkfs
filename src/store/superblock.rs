@@ -70,7 +70,8 @@ pub struct SlotEntry {
 const SLOT_ENTRY_SIZE: usize = 13;
 
 /// Maximum entries that fit: (PAYLOAD_SIZE - SB_HEADER_SIZE - INTEGRITY_SIZE - 4 for count) / SLOT_ENTRY_SIZE
-const MAX_SLOT_ENTRIES: usize = (PAYLOAD_SIZE - SB_HEADER_SIZE - INTEGRITY_SIZE - 4) / SLOT_ENTRY_SIZE;
+const MAX_SLOT_ENTRIES: usize =
+    (PAYLOAD_SIZE - SB_HEADER_SIZE - INTEGRITY_SIZE - 4) / SLOT_ENTRY_SIZE;
 
 impl Superblock {
     /// Create a new superblock with a fresh random salt.
@@ -132,8 +133,7 @@ fn derive_superblock_key(master_secret: &[u8; 32]) -> Result<Zeroizing<[u8; 32]>
 
 /// Compute HMAC integrity over the superblock fields.
 fn compute_integrity(master_secret: &[u8; 32], data: &[u8]) -> [u8; 32] {
-    let mut mac =
-        HmacSha256::new_from_slice(master_secret).expect("HMAC accepts any key length");
+    let mut mac = HmacSha256::new_from_slice(master_secret).expect("HMAC accepts any key length");
     mac.update(b"darkfs-superblock-integrity");
     mac.update(data);
     let result = mac.finalize().into_bytes();
@@ -143,17 +143,15 @@ fn compute_integrity(master_secret: &[u8; 32], data: &[u8]) -> [u8; 32] {
 }
 
 /// Serialize the superblock into bytes.
-fn serialize_superblock(
-    master_secret: &[u8; 32],
-    sb: &Superblock,
-) -> Result<Vec<u8>, DarkError> {
+fn serialize_superblock(master_secret: &[u8; 32], sb: &Superblock) -> Result<Vec<u8>, DarkError> {
     if sb.slot_map.len() > MAX_SLOT_ENTRIES {
         return Err(DarkError::SuperblockFull {
             max_entries: MAX_SLOT_ENTRIES,
         });
     }
 
-    let mut buf = vec![0u8; SB_HEADER_SIZE + 4 + sb.slot_map.len() * SLOT_ENTRY_SIZE + INTEGRITY_SIZE];
+    let mut buf =
+        vec![0u8; SB_HEADER_SIZE + 4 + sb.slot_map.len() * SLOT_ENTRY_SIZE + INTEGRITY_SIZE];
     let mut pos = 0;
 
     // Header
@@ -192,10 +190,7 @@ fn serialize_superblock(
 }
 
 /// Deserialize and validate a superblock from bytes.
-fn deserialize_superblock(
-    master_secret: &[u8; 32],
-    buf: &[u8],
-) -> Result<Superblock, DarkError> {
+fn deserialize_superblock(master_secret: &[u8; 32], buf: &[u8]) -> Result<Superblock, DarkError> {
     if buf.len() < SB_HEADER_SIZE + 4 + INTEGRITY_SIZE {
         return Err(DarkError::SuperblockCorrupt);
     }
@@ -367,7 +362,12 @@ pub fn write_superblock(
     // Shard it via QSMM.
     let placements = mesh
         .shard_metadata(&serialized, &qsmm_key, hw_entropy)
-        .map_err(|e| DarkError::Io(std::io::Error::new(std::io::ErrorKind::Other, format!("mesh shard failed: {e}"))))?;
+        .map_err(|e| {
+            DarkError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("mesh shard failed: {e}"),
+            ))
+        })?;
 
     // Encrypt and write each shard.
     for placement in &placements {
@@ -390,8 +390,7 @@ pub fn write_superblock(
 
 /// Compute a path hash for the slot map.
 pub fn path_hash(secret: &[u8; 32], canonical_path: &str) -> u64 {
-    let mut mac =
-        HmacSha256::new_from_slice(secret).expect("HMAC accepts any key length");
+    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC accepts any key length");
     mac.update(b"darkfs-path-hash");
     mac.update(canonical_path.as_bytes());
     let result = mac.finalize().into_bytes();

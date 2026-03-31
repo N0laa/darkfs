@@ -146,9 +146,7 @@ fn prompt_passphrase() -> Zeroizing<String> {
         std::env::remove_var("DARKFS_PASSPHRASE");
         return Zeroizing::new(pass);
     }
-    Zeroizing::new(
-        rpassword::prompt_password("Passphrase: ").expect("failed to read passphrase"),
-    )
+    Zeroizing::new(rpassword::prompt_password("Passphrase: ").expect("failed to read passphrase"))
 }
 
 fn format_size(bytes: u64) -> String {
@@ -206,7 +204,12 @@ fn die(msg: &str) -> ! {
 /// Open vault, derive secrets, return everything needed for operations.
 fn open_vault(
     vault: &Path,
-) -> (ImageFile, Zeroizing<[u8; 32]>, Zeroizing<[u8; 32]>, Superblock) {
+) -> (
+    ImageFile,
+    Zeroizing<[u8; 32]>,
+    Zeroizing<[u8; 32]>,
+    Superblock,
+) {
     let passphrase = prompt_passphrase();
     let preset = get_preset();
 
@@ -249,8 +252,8 @@ fn cmd_create(vault: &Path, size_str: &str) {
 
     println!("Creating {} vault...", format_size(size));
 
-    let mut file = fs::File::create(vault)
-        .unwrap_or_else(|e| die(&format!("Cannot create file: {e}")));
+    let mut file =
+        fs::File::create(vault).unwrap_or_else(|e| die(&format!("Cannot create file: {e}")));
 
     let chunk_size = 16 * 1024 * 1024; // 16 MB at a time
     let mut remaining = size as usize;
@@ -282,28 +285,32 @@ fn cmd_put(vault: &Path, input: &Path, name_override: Option<&str>) {
     };
     let vpath = normalize_path(&filename);
 
-    let data = fs::read(input)
-        .unwrap_or_else(|e| die(&format!("Cannot read {}: {e}", input.display())));
+    let data =
+        fs::read(input).unwrap_or_else(|e| die(&format!("Cannot read {}: {e}", input.display())));
 
     let (mut img, master, session, mut sb) = open_vault(vault);
 
     // Populate collision tracking
     darkfs::fs::ops::populate_claims(&mut img, &session).ok();
 
-    create_file(&mut img, &session, &vpath, &data)
-        .unwrap_or_else(|e| match e {
-            darkfs::util::errors::DarkError::NoSlotAvailable { .. } => {
-                die("Vault is full. Create a larger vault to store more files.");
-            }
-            _ => die(&format!("Write failed: {e}")),
-        });
+    create_file(&mut img, &session, &vpath, &data).unwrap_or_else(|e| match e {
+        darkfs::util::errors::DarkError::NoSlotAvailable { .. } => {
+            die("Vault is full. Create a larger vault to store more files.");
+        }
+        _ => die(&format!("Write failed: {e}")),
+    });
 
     // Update superblock
     sb.generation += 1;
     sb.file_count = sb.file_count.saturating_add(1);
     let _ = write_superblock(&mut img, &master, &sb);
 
-    println!("Stored {} ({}) as {}", input.display(), format_size(data.len() as u64), vpath);
+    println!(
+        "Stored {} ({}) as {}",
+        input.display(),
+        format_size(data.len() as u64),
+        vpath
+    );
 }
 
 fn cmd_get(vault: &Path, name: &str, dest: Option<&Path>) {
@@ -328,7 +335,11 @@ fn cmd_get(vault: &Path, name: &str, dest: Option<&Path>) {
             fs::write(&out_path, &*data)
                 .unwrap_or_else(|e| die(&format!("Cannot write {}: {e}", out_path.display())));
 
-            println!("Retrieved {} ({})", out_path.display(), format_size(data.len() as u64));
+            println!(
+                "Retrieved {} ({})",
+                out_path.display(),
+                format_size(data.len() as u64)
+            );
         }
         Ok(None) => {
             eprintln!("File not found (or wrong passphrase).");
@@ -346,8 +357,8 @@ fn cmd_ls(vault: &Path, dir: Option<&str>) {
 
     let (mut img, _master, session, _sb) = open_vault(vault);
 
-    let idx = list_dir(&mut img, &session, &vpath)
-        .unwrap_or_else(|e| die(&format!("Cannot list: {e}")));
+    let idx =
+        list_dir(&mut img, &session, &vpath).unwrap_or_else(|e| die(&format!("Cannot list: {e}")));
 
     if idx.entries.is_empty() {
         println!("(empty)");
@@ -383,8 +394,7 @@ fn cmd_rm(vault: &Path, name: &str) {
 
     darkfs::fs::ops::populate_claims(&mut img, &session).ok();
 
-    delete_file(&mut img, &session, &vpath)
-        .unwrap_or_else(|e| die(&format!("Delete failed: {e}")));
+    delete_file(&mut img, &session, &vpath).unwrap_or_else(|e| die(&format!("Delete failed: {e}")));
 
     sb.generation += 1;
     sb.file_count = sb.file_count.saturating_sub(1);
@@ -400,8 +410,7 @@ fn cmd_mkdir(vault: &Path, name: &str) {
 
     darkfs::fs::ops::populate_claims(&mut img, &session).ok();
 
-    mkdir(&mut img, &session, &vpath)
-        .unwrap_or_else(|e| die(&format!("mkdir failed: {e}")));
+    mkdir(&mut img, &session, &vpath).unwrap_or_else(|e| die(&format!("mkdir failed: {e}")));
 
     sb.generation += 1;
     let _ = write_superblock(&mut img, &master, &sb);

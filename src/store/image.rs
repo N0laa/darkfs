@@ -42,7 +42,8 @@ impl ImageFile {
 
         // Acquire an exclusive advisory lock to prevent concurrent access.
         // The lock is released automatically when the File is dropped.
-        file.try_lock_exclusive().map_err(|_| DarkError::ImageLocked)?;
+        file.try_lock_exclusive()
+            .map_err(|_| DarkError::ImageLocked)?;
 
         Ok(Self {
             file,

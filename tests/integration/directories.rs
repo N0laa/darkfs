@@ -14,7 +14,9 @@ fn create_and_read_file() {
     let secret = [42u8; 32];
 
     create_file(&mut img, &secret, "/hello.txt", b"hello world").unwrap();
-    let data = read_file_data(&mut img, &secret, "/hello.txt").unwrap().unwrap();
+    let data = read_file_data(&mut img, &secret, "/hello.txt")
+        .unwrap()
+        .unwrap();
     assert_eq!(&*data, b"hello world");
 }
 
@@ -60,7 +62,9 @@ fn nested_directories() {
     create_file(&mut img, &secret, "/a/b/c/deep.txt", b"deep content").unwrap();
 
     // Verify the full path works
-    let data = read_file_data(&mut img, &secret, "/a/b/c/deep.txt").unwrap().unwrap();
+    let data = read_file_data(&mut img, &secret, "/a/b/c/deep.txt")
+        .unwrap()
+        .unwrap();
     assert_eq!(&*data, b"deep content");
 
     // Verify directory listings
@@ -222,7 +226,9 @@ fn overwrite_file_preserves_dirindex() {
     assert_eq!(count, 1);
 
     // Should have the new data
-    let data = read_file_data(&mut img, &secret, "/data.bin").unwrap().unwrap();
+    let data = read_file_data(&mut img, &secret, "/data.bin")
+        .unwrap()
+        .unwrap();
     assert_eq!(&*data, b"version 2");
 }
 

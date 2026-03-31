@@ -43,7 +43,10 @@ fn overwrite_produces_different_ciphertext() {
             changed.push(b);
         }
     }
-    assert!(!changed.is_empty(), "overwrite should change at least one block");
+    assert!(
+        !changed.is_empty(),
+        "overwrite should change at least one block"
+    );
 
     // Nonces (first 24 bytes) must differ
     let b = changed[0];
@@ -105,7 +108,10 @@ fn same_content_same_key_produces_different_blocks() {
     let block_after = block_after.expect("should find block");
 
     // Random nonce means the on-disk block must differ
-    assert_ne!(block_before, block_after, "same plaintext must produce different ciphertext");
+    assert_ne!(
+        block_before, block_after,
+        "same plaintext must produce different ciphertext"
+    );
 }
 
 // --- Timing side-channel resistance ---
@@ -223,7 +229,10 @@ fn populate_claims_protects_across_sessions() {
     // Original files should still be intact
     for (path, original) in &written {
         match read_file(&mut img, &secret, path) {
-            Ok(Some(data)) => assert_eq!(&*data, original, "{path} destroyed by second session writes"),
+            Ok(Some(data)) => assert_eq!(
+                &*data, original,
+                "{path} destroyed by second session writes"
+            ),
             other => panic!("{path} lost or errored: {other:?}"),
         }
     }
@@ -249,7 +258,10 @@ fn reserved_name_dirindex_rejected() {
     assert!(result.is_err(), "creating .dirindex should be rejected");
 
     let result = create_file(&mut img, &secret, "/sub/.dirindex", b"malicious");
-    assert!(result.is_err(), "creating /sub/.dirindex should be rejected");
+    assert!(
+        result.is_err(),
+        "creating /sub/.dirindex should be rejected"
+    );
 }
 
 #[test]
@@ -300,7 +312,10 @@ fn corrupted_block_returns_error_not_panic() {
 
     // Read should return an error, not panic
     let result = read_file(&mut img, &secret, "/crash");
-    assert!(result.is_err(), "corrupted file should return error, not Ok");
+    assert!(
+        result.is_err(),
+        "corrupted file should return error, not Ok"
+    );
 }
 
 // --- Header structure leak resistance ---

@@ -334,10 +334,7 @@ fn walk_dir_for_tree(
 /// writes will not silently overwrite blocks belonging to existing files.
 /// Should be called once after opening an image (e.g., at mount time or
 /// before a write session in CLI mode).
-pub fn populate_claims(
-    image: &mut ImageFile,
-    master_secret: &[u8; 32],
-) -> DarkResult<()> {
+pub fn populate_claims(image: &mut ImageFile, master_secret: &[u8; 32]) -> DarkResult<()> {
     walk_dir_for_claims(image, master_secret, "/")
 }
 

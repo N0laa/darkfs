@@ -12,7 +12,9 @@ use crate::crypto::locator::canonical_path;
 use crate::fs::inode::FileHeader;
 use crate::store::image::ImageFile;
 use crate::store::slots::{erase_slot, erase_slot_at, read_slot, write_slot_cow};
-use crate::util::constants::{tier_block_count, DATA_IN_BLOCK0, DATA_IN_BLOCKN, HEADER_SIZE, PAYLOAD_SIZE};
+use crate::util::constants::{
+    tier_block_count, DATA_IN_BLOCK0, DATA_IN_BLOCKN, HEADER_SIZE, PAYLOAD_SIZE,
+};
 use crate::util::errors::{DarkError, DarkResult};
 
 /// Maximum file size: limited by u32 block_count in the header.

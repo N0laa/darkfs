@@ -1,9 +1,9 @@
 //! Integration test: write file → read file roundtrip with various sizes.
 
-use rand::RngCore;
 use darkfs::crypto::kdf::{derive_master_secret, KdfPreset};
 use darkfs::fs::file::{read_file, write_file};
 use darkfs::util::constants::{BLOCK_SIZE, DATA_IN_BLOCK0, DATA_IN_BLOCKN};
+use rand::RngCore;
 
 use crate::common::create_random_image;
 
@@ -19,7 +19,9 @@ fn test_roundtrip(data_size: usize) {
     }
 
     write_file(&mut img, &secret, "/test/file.bin", &data).unwrap();
-    let result = read_file(&mut img, &secret, "/test/file.bin").unwrap().unwrap();
+    let result = read_file(&mut img, &secret, "/test/file.bin")
+        .unwrap()
+        .unwrap();
     assert_eq!(&*result, &data);
 }
 
