@@ -104,10 +104,28 @@ darkfs rm vault.img secret.pdf           # overwritten with random noise — gon
 ### 7. Mount as a folder (FUSE)
 
 ```bash
+darkfs mount vault.img ~/private         # enter passphrase once
+cp document.pdf ~/private/               # no passphrase needed
+ls ~/private/                            # no passphrase needed
+darkfs unmount ~/private                 # keys wiped from memory
+```
+
+## Passphrase Handling
+
+Each CLI command (`put`, `get`, `ls`, `rm`, `info`, `mkdir`) prompts for the passphrase, derives keys, performs the operation, then wipes everything from memory and exits. This is the safest mode — keys exist only for milliseconds.
+
+If entering the passphrase repeatedly is impractical, you have two options:
+
+```bash
+# Option 1: FUSE mount — enter passphrase once, use as a normal folder
 darkfs mount vault.img ~/private
-cp document.pdf ~/private/
-ls ~/private/
-darkfs unmount ~/private
+# Now use cp, mv, cat, etc. freely — no passphrase prompts
+darkfs unmount ~/private                 # keys wiped on unmount
+
+# Option 2: Environment variable — for scripts (use with caution)
+DARKFS_PASSPHRASE="mypass" darkfs put vault.img file.txt
+# The variable is cleared from the process environment after reading,
+# but may still be visible in shell history or process listings.
 ```
 
 ## Multiple Passphrases (Deniability)
