@@ -164,6 +164,27 @@ This means:
 
 > **The golden rule: remember your passphrase.** There is no reset. There is no recovery. There is no proof it ever existed. That's the point.
 
+## Best Use Cases
+
+**USB stick.** Create a vault on a flash drive. If the drive is lost, seized, or inspected, it looks like a corrupted or wiped drive — random data with no filesystem signature. Border agents, thieves, or forensic tools find nothing.
+
+```bash
+# Create a vault on a USB stick (replace with your device path)
+darkfs create /Volumes/USBSTICK/random.bin 8G
+
+# Store files
+darkfs put /Volumes/USBSTICK/random.bin documents.zip
+
+# On any other machine with darkfs installed
+darkfs get /Volumes/USBSTICK/random.bin documents.zip .
+```
+
+**Portable file on cloud storage.** Upload `vault.img` to Dropbox, Google Drive, or any cloud service. It's just a blob of random bytes. The cloud provider can't identify it. Download it anywhere, enter your passphrase, get your files.
+
+**Alongside real data.** Keep `random.bin` next to normal files on the same drive. It looks like a disk image, a swap file, or leftover data. Nobody can prove otherwise.
+
+**Decoy under compulsion.** If forced to reveal a passphrase, give the decoy. The adversary sees harmless files. They have no way to determine if another passphrase exists — technically or mathematically.
+
 ## Threat Model
 
 ### What darkfs protects against
