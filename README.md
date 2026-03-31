@@ -2,9 +2,41 @@
 
 **A deniable steganographic filesystem. Nothing to see here.**
 
-darkfs is a FUSE-based encrypted filesystem where the entire disk image is indistinguishable from random data. No headers, no magic bytes, no metadata, no partition table -- nothing reveals whether the image is in use or was simply filled with `/dev/urandom`.
+darkfs is a FUSE-based encrypted filesystem where the entire disk image is indistinguishable from random data. No headers, no magic bytes, no metadata, no partition table — nothing reveals whether the image is in use or was simply filled with `/dev/urandom`.
 
-The only secret is a passphrase in your head. Everything else -- block locations, encryption keys, directory structure -- is deterministically derived from that passphrase.
+The only secret is a passphrase in your head. Everything else — block locations, encryption keys, directory structure — is deterministically derived from that passphrase.
+
+> **Warning**: This is experimental cryptographic software that has not been externally audited. It has undergone multiple internal security audits (see [SECURITY.md](SECURITY.md)) with all findings fixed, but should not be your only protection for life-critical data. Use alongside established tools, not as a replacement.
+
+## Why darkfs?
+
+Most encryption tools protect your data. darkfs goes further — it hides the fact that data exists at all.
+
+This project started as a research question: **can software be truly invisible?** Not just encrypted, but indistinguishable from nothing. A file that looks like random noise. A filesystem that can't be proven to exist. A passphrase that can't be proven wrong.
+
+Existing tools like VeraCrypt and LUKS do encryption well, but they leave fingerprints — headers, partition tables, magic bytes. An adversary doesn't need to break the crypto if they can simply prove you're hiding something. In a world where big tech and surveillance systems grow more capable every year, the ability to say "there's nothing here" — and have that be mathematically unfalsifiable — matters.
+
+darkfs is for anyone who thinks that should be possible. Journalists, activists, researchers, or anyone who believes privacy isn't just about locking the door — it's about making the door disappear.
+
+## How It Works
+
+```
+passphrase ──► Argon2id ──► master_secret
+                                │
+                  ┌─────────────┼─────────────┐
+                  ▼             ▼             ▼
+            superblock     session_secret   void mask
+            (5-of-9       (per-block keys)  (ChaCha20
+             shards)                         noise layer)
+                  │             │             │
+                  ▼             ▼             ▼
+               ┌──────────────────────────────────┐
+               │  Image: indistinguishable from    │
+               │  /dev/urandom                     │
+               └──────────────────────────────────┘
+```
+
+Every block on disk: `XChaCha20-Poly1305(data) XOR ChaCha20(mask)` — two independent encryption layers. The entire image passes all statistical randomness tests.
 
 ## Key Properties
 
@@ -176,6 +208,13 @@ Benchmarks on Apple M-series (release build):
 - **Collision risk**: With 16-slot cuckoo hashing, practical fill rate is ~50-60%. Keep usage below 50% for safety.
 - **No file locking**: Concurrent access to the same image will corrupt data.
 - **macOS extended attributes**: Finder creates `._*` files on non-HFS filesystems. These are harmless encrypted data but consume blocks.
+
+## Documentation
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) — Technical design, key derivation chain, block layout, collision resolution
+- [SECURITY.md](SECURITY.md) — Security audit findings, threat model, known limitations
+- [CONTRIBUTING.md](CONTRIBUTING.md) — Development setup, code style, testing guidelines
+- [CHANGELOG.md](CHANGELOG.md) — Release history
 
 ## License
 
