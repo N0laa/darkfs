@@ -83,6 +83,22 @@ pub enum VoidError {
         /// Why the operation is invalid.
         reason: String,
     },
+
+    /// A reserved filename was used (e.g., `.dirindex`).
+    #[error("reserved filename: {name}")]
+    ReservedName {
+        /// The reserved filename.
+        name: String,
+    },
+
+    /// The file is too large to store.
+    #[error("file too large: {size} bytes (max: {max})")]
+    FileTooLarge {
+        /// The requested file size.
+        size: u64,
+        /// The maximum supported size.
+        max: u64,
+    },
 }
 
 /// A convenience type alias for Results with [`VoidError`].

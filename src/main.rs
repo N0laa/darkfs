@@ -35,10 +35,6 @@ enum Command {
         /// Use fast (dev) KDF parameters
         #[arg(long)]
         dev: bool,
-
-        /// Run in foreground (don't daemonize)
-        #[arg(short, long)]
-        foreground: bool,
     },
 
     /// Unmount a void filesystem
@@ -150,10 +146,6 @@ fn open_image_and_derive_secret(
 }
 
 fn main() {
-    if std::env::var("RUST_LOG").is_ok() {
-        tracing_subscriber::fmt::init();
-    }
-
     let cli = Cli::parse();
 
     match cli.command {
@@ -162,7 +154,6 @@ fn main() {
             image,
             mountpoint,
             dev,
-            foreground,
         } => {
             let passphrase = prompt_passphrase();
             let (img, secret) =
@@ -176,7 +167,6 @@ fn main() {
                 fuser::MountOption::FSName("fuse".to_string()),
                 fuser::MountOption::AutoUnmount,
             ];
-            let _ = foreground; // fuser runs in foreground by default
 
             println!("Mounting {} at {}", image.display(), mountpoint.display());
             if let Err(e) = fuser::mount2(handler, &mountpoint, &options) {

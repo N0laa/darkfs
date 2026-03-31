@@ -13,13 +13,23 @@ use crate::store::slots::{read_slot, write_slot};
 use crate::util::constants::{DATA_IN_BLOCK0, DATA_IN_BLOCKN, HEADER_SIZE, PAYLOAD_SIZE};
 use crate::util::errors::{VoidError, VoidResult};
 
+/// Maximum file size: limited by u32 block_count in the header.
+/// 1 header block + (u32::MAX - 1) data blocks * 4080 bytes each.
+const MAX_FILE_SIZE: u64 = DATA_IN_BLOCK0 as u64 + (u32::MAX as u64 - 1) * DATA_IN_BLOCKN as u64;
+
 /// Compute the number of blocks needed to store `data_len` bytes.
-fn compute_block_count(data_len: usize) -> u32 {
+fn compute_block_count(data_len: usize) -> VoidResult<u32> {
+    if data_len as u64 > MAX_FILE_SIZE {
+        return Err(VoidError::FileTooLarge {
+            size: data_len as u64,
+            max: MAX_FILE_SIZE,
+        });
+    }
     if data_len <= DATA_IN_BLOCK0 {
-        1
+        Ok(1)
     } else {
         let remaining = data_len - DATA_IN_BLOCK0;
-        1 + remaining.div_ceil(DATA_IN_BLOCKN) as u32
+        Ok(1 + remaining.div_ceil(DATA_IN_BLOCKN) as u32)
     }
 }
 
@@ -36,7 +46,7 @@ pub fn write_file(
     data: &[u8],
 ) -> VoidResult<()> {
     let canon = canonical_path(path);
-    let block_count = compute_block_count(data.len());
+    let block_count = compute_block_count(data.len())?;
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -105,6 +115,15 @@ pub fn read_file(
     };
 
     let file_size = header.file_size as usize;
+    // Sanity check: file_size should not exceed what block_count can hold
+    let max_for_blocks = if header.block_count <= 1 {
+        DATA_IN_BLOCK0
+    } else {
+        DATA_IN_BLOCK0 + (header.block_count as usize - 1) * DATA_IN_BLOCKN
+    };
+    if file_size > max_for_blocks {
+        return Ok(None); // corrupted header — treat as nonexistent
+    }
     let mut result = Vec::with_capacity(file_size);
 
     // Data from block 0
@@ -146,20 +165,26 @@ mod tests {
 
     #[test]
     fn block_count_small_file() {
-        assert_eq!(compute_block_count(0), 1);
-        assert_eq!(compute_block_count(1), 1);
-        assert_eq!(compute_block_count(DATA_IN_BLOCK0), 1);
+        assert_eq!(compute_block_count(0).unwrap(), 1);
+        assert_eq!(compute_block_count(1).unwrap(), 1);
+        assert_eq!(compute_block_count(DATA_IN_BLOCK0).unwrap(), 1);
     }
 
     #[test]
     fn block_count_needs_two() {
-        assert_eq!(compute_block_count(DATA_IN_BLOCK0 + 1), 2);
-        assert_eq!(compute_block_count(DATA_IN_BLOCK0 + DATA_IN_BLOCKN), 2);
+        assert_eq!(compute_block_count(DATA_IN_BLOCK0 + 1).unwrap(), 2);
+        assert_eq!(
+            compute_block_count(DATA_IN_BLOCK0 + DATA_IN_BLOCKN).unwrap(),
+            2
+        );
     }
 
     #[test]
     fn block_count_needs_three() {
-        assert_eq!(compute_block_count(DATA_IN_BLOCK0 + DATA_IN_BLOCKN + 1), 3);
+        assert_eq!(
+            compute_block_count(DATA_IN_BLOCK0 + DATA_IN_BLOCKN + 1).unwrap(),
+            3
+        );
     }
 
     #[test]

@@ -45,7 +45,6 @@ struct Cli {
 // ─── Image generation ────────────────────────────────────────────────────────
 
 const IMAGE_BLOCKS: u64 = 16384; // 64 MB
-const _IMAGE_SIZE: u64 = IMAGE_BLOCKS * BLOCK_SIZE as u64;
 
 fn create_random_image(path: &std::path::Path) {
     let mut file = File::create(path).expect("create image file");

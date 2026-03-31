@@ -56,6 +56,22 @@ impl Drop for OpenFile {
     }
 }
 
+/// Map a VoidError to an appropriate libc errno.
+fn to_errno(e: &crate::util::errors::VoidError) -> i32 {
+    use crate::util::errors::VoidError;
+    match e {
+        VoidError::FileNotFound => libc::ENOENT,
+        VoidError::AlreadyExists { .. } => libc::EEXIST,
+        VoidError::DirectoryNotEmpty { .. } => libc::ENOTEMPTY,
+        VoidError::InvalidOperation { .. } => libc::EINVAL,
+        VoidError::NoSlotAvailable { .. } => libc::ENOSPC,
+        VoidError::ReservedName { .. } => libc::EINVAL,
+        VoidError::FileTooLarge { .. } => libc::EFBIG,
+        VoidError::Io(_) => libc::EIO,
+        _ => libc::EIO,
+    }
+}
+
 impl VoidFsHandler {
     /// Create a new FUSE handler.
     pub fn new(image: ImageFile, master_secret: [u8; 32], uid: u32, gid: u32) -> Self {
@@ -514,8 +530,8 @@ impl Filesystem for VoidFsHandler {
         };
 
         // Create empty file
-        if ops::create_file(&mut self.image, &self.master_secret, &child, &[]).is_err() {
-            reply.error(libc::EIO);
+        if let Err(e) = ops::create_file(&mut self.image, &self.master_secret, &child, &[]) {
+            reply.error(to_errno(&e));
             return;
         }
 
@@ -546,7 +562,7 @@ impl Filesystem for VoidFsHandler {
 
         match ops::delete_file(&mut self.image, &self.master_secret, &child) {
             Ok(()) => reply.ok(),
-            Err(_) => reply.error(libc::EIO),
+            Err(ref e) => reply.error(to_errno(e)),
         }
     }
 
@@ -567,8 +583,8 @@ impl Filesystem for VoidFsHandler {
             }
         };
 
-        if ops::mkdir(&mut self.image, &self.master_secret, &child).is_err() {
-            reply.error(libc::EIO);
+        if let Err(e) = ops::mkdir(&mut self.image, &self.master_secret, &child) {
+            reply.error(to_errno(&e));
             return;
         }
 
@@ -587,7 +603,7 @@ impl Filesystem for VoidFsHandler {
 
         match ops::rmdir(&mut self.image, &self.master_secret, &child) {
             Ok(()) => reply.ok(),
-            Err(_) => reply.error(libc::EIO),
+            Err(ref e) => reply.error(to_errno(e)),
         }
     }
 

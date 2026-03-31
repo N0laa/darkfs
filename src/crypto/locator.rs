@@ -10,7 +10,8 @@ type HmacSha256 = Hmac<Sha256>;
 
 /// Normalize a path into a canonical form.
 ///
-/// Rules: split by `/`, discard empty segments, rejoin with `/`, prepend `/`.
+/// Rules: split by `/`, discard empty and `.` segments, resolve `..` by
+/// popping the previous segment, rejoin with `/`, prepend `/`.
 ///
 /// ```
 /// # use voidfs::crypto::locator::canonical_path;
@@ -19,13 +20,25 @@ type HmacSha256 = Hmac<Sha256>;
 /// assert_eq!(canonical_path("foo"), "/foo");
 /// assert_eq!(canonical_path("//a//b/"), "/a/b");
 /// assert_eq!(canonical_path("/foo/bar"), "/foo/bar");
+/// assert_eq!(canonical_path("/foo/../bar"), "/bar");
+/// assert_eq!(canonical_path("/foo/./bar"), "/foo/bar");
+/// assert_eq!(canonical_path("/../../../etc"), "/etc");
 /// ```
 pub fn canonical_path(path: &str) -> String {
-    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    if segments.is_empty() {
+    let mut resolved: Vec<&str> = Vec::new();
+    for seg in path.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                resolved.pop();
+            }
+            s => resolved.push(s),
+        }
+    }
+    if resolved.is_empty() {
         "/".to_string()
     } else {
-        format!("/{}", segments.join("/"))
+        format!("/{}", resolved.join("/"))
     }
 }
 
@@ -82,6 +95,19 @@ mod tests {
     #[test]
     fn canonical_path_normal() {
         assert_eq!(canonical_path("/foo/bar"), "/foo/bar");
+    }
+
+    #[test]
+    fn canonical_path_dotdot() {
+        assert_eq!(canonical_path("/foo/../bar"), "/bar");
+        assert_eq!(canonical_path("/a/b/c/../../d"), "/a/d");
+        assert_eq!(canonical_path("/../../../etc"), "/etc");
+    }
+
+    #[test]
+    fn canonical_path_dot() {
+        assert_eq!(canonical_path("/foo/./bar"), "/foo/bar");
+        assert_eq!(canonical_path("/."), "/");
     }
 
     #[test]

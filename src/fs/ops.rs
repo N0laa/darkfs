@@ -12,6 +12,19 @@ use crate::store::slots::{erase_slot, read_slot};
 use crate::util::constants::HEADER_SIZE;
 use crate::util::errors::{VoidError, VoidResult};
 
+/// Names reserved for internal use that cannot be used as filenames.
+const RESERVED_NAMES: &[&str] = &[".dirindex"];
+
+/// Check if a filename is reserved.
+fn reject_reserved(name: &str) -> VoidResult<()> {
+    if RESERVED_NAMES.contains(&name) {
+        return Err(VoidError::ReservedName {
+            name: name.to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// Create or overwrite a file and update the parent directory index.
 ///
 /// If the parent directory's `.dirindex` doesn't exist yet, it is created.
@@ -26,6 +39,7 @@ pub fn create_file(
     let canon = canonical_path(path);
     let parent = parent_of(&canon);
     let name = filename_of(&canon);
+    reject_reserved(name)?;
 
     // Write the file data
     write_file(image, master_secret, &canon, data)?;
@@ -87,6 +101,7 @@ pub fn mkdir(image: &mut ImageFile, master_secret: &[u8; 32], path: &str) -> Voi
 
     let parent = parent_of(&canon);
     let name = filename_of(&canon);
+    reject_reserved(name)?;
 
     // Check if already exists in parent
     let mut parent_idx = read_dirindex(image, master_secret, parent)?;

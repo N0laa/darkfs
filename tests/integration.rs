@@ -1,3 +1,5 @@
+mod common;
+
 mod integration {
     mod collision;
     mod deniability;

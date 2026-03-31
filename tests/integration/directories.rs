@@ -1,24 +1,12 @@
 //! Integration tests for directory operations.
 
-use rand::RngCore;
-use tempfile::NamedTempFile;
 use voidfs::fs::directory::FileType;
 use voidfs::fs::ops::{
     create_file, delete_file, list_dir, mkdir, read_file_data, rmdir, rmdir_recursive, stat,
 };
-use voidfs::store::image::ImageFile;
-use voidfs::util::constants::BLOCK_SIZE;
 use voidfs::util::errors::VoidError;
 
-fn create_random_image(num_blocks: u64) -> (NamedTempFile, ImageFile) {
-    let tmp = NamedTempFile::new().expect("create tempfile");
-    let size = num_blocks * BLOCK_SIZE as u64;
-    let mut buf = vec![0u8; size as usize];
-    rand::thread_rng().fill_bytes(&mut buf);
-    std::io::Write::write_all(&mut tmp.as_file(), &buf).unwrap();
-    let img = ImageFile::open(tmp.path()).unwrap();
-    (tmp, img)
-}
+use crate::common::create_random_image;
 
 #[test]
 fn create_and_read_file() {

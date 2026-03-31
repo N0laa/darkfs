@@ -1,20 +1,8 @@
 //! Integration test: slot collision handling on a small image.
 
-use rand::RngCore;
-use tempfile::NamedTempFile;
 use voidfs::fs::file::{read_file, write_file};
-use voidfs::store::image::ImageFile;
-use voidfs::util::constants::BLOCK_SIZE;
 
-fn create_random_image(num_blocks: u64) -> (NamedTempFile, ImageFile) {
-    let tmp = NamedTempFile::new().expect("create tempfile");
-    let size = num_blocks * BLOCK_SIZE as u64;
-    let mut buf = vec![0u8; size as usize];
-    rand::thread_rng().fill_bytes(&mut buf);
-    std::io::Write::write_all(&mut tmp.as_file(), &buf).unwrap();
-    let img = ImageFile::open(tmp.path()).unwrap();
-    (tmp, img)
-}
+use crate::common::create_random_image;
 
 #[test]
 fn multiple_small_files_on_small_image() {
