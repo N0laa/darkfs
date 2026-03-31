@@ -48,112 +48,103 @@ Every block on disk: `XChaCha20-Poly1305(data) XOR ChaCha20(mask)` — two indep
 
 ## Quick Start
 
+### 1. Build
+
 ```bash
-# Build
+# Without FUSE (CLI only: put/get/ls/rm)
+cargo build --release
+
+# With FUSE (adds mount/unmount — requires macFUSE or libfuse3)
 cargo build --features fuse --release
+```
 
-# Create a 2 GiB vault (filled with random data)
-darkfs create vault.img 2G
+Prerequisites: Rust 1.70+. For FUSE: macOS needs [macFUSE](https://macfuse.github.io/), Linux needs `apt install libfuse3-dev pkg-config`.
 
-# Store a file (enter passphrase when prompted)
-darkfs put vault.img secret.pdf
+### 2. Create a vault
 
-# Retrieve a file
-darkfs get vault.img secret.pdf .
+```bash
+darkfs create vault.img 1G
+```
 
-# List files
-darkfs ls vault.img
+This fills a file with random noise. Right now it's just noise. A passphrase will give it meaning.
 
-# Or mount with FUSE (requires --features fuse)
+### 3. Store files
+
+```bash
+darkfs put vault.img secret.pdf          # enter passphrase when prompted
+darkfs put vault.img taxes.xlsx
+darkfs put vault.img --name /docs/notes.txt notes.txt
+darkfs mkdir vault.img /photos
+```
+
+### 4. List and retrieve
+
+```bash
+darkfs ls vault.img                      # enter same passphrase
+darkfs get vault.img secret.pdf .        # writes to current directory
+darkfs info vault.img                    # file count, storage used, tree
+```
+
+### 5. Now try a wrong passphrase
+
+```bash
+darkfs ls vault.img                      # enter a DIFFERENT passphrase
+# → (empty)
+# No error. No "wrong password." Just... nothing.
+```
+
+This is the key moment. The system can't tell the difference between a wrong passphrase, a fresh vault, and a random file from `/dev/urandom`. All three look the same. **That's the deniability.**
+
+### 6. Delete files
+
+```bash
+darkfs rm vault.img secret.pdf           # overwritten with random noise — gone
+```
+
+### 7. Mount as a folder (FUSE)
+
+```bash
 darkfs mount vault.img ~/private
 cp document.pdf ~/private/
 ls ~/private/
-umount ~/private
-
-# vault.img is now indistinguishable from random noise
-```
-
-## Installation
-
-### Prerequisites
-
-- Rust 1.70+
-- macOS: [macFUSE](https://macfuse.github.io/) (`brew install macfuse`, approve in System Settings, reboot)
-- Linux: `apt install libfuse3-dev pkg-config` (or equivalent)
-
-### Build
-
-```bash
-# With FUSE support (mount/unmount commands)
-cargo build --features fuse --release
-
-# Without FUSE (library + direct read/write commands only)
-cargo build --release
-```
-
-## Commands
-
-### `darkfs create` -- Create a vault
-
-```bash
-darkfs create vault.img 500M
-darkfs create vault.img 2G
-```
-
-### `darkfs mount` -- Mount as FUSE filesystem
-
-```bash
-darkfs mount vault.img ~/private
-```
-
-### `darkfs unmount` -- Unmount
-
-```bash
 darkfs unmount ~/private
-# or: umount ~/private
-```
-
-### `darkfs info` -- Show vault info
-
-```bash
-darkfs info vault.img
-```
-
-Requires the correct passphrase. Shows file count, directory count, data stored, and a file listing.
-
-### `darkfs put` / `darkfs get` -- Direct vault access
-
-```bash
-# Store a file without mounting
-darkfs put vault.img secret.txt
-
-# Retrieve a file without mounting
-darkfs get vault.img secret.txt .
-
-# List files
-darkfs ls vault.img
-
-# Delete a file
-darkfs rm vault.img secret.txt
 ```
 
 ## Multiple Passphrases (Deniability)
 
+The same vault can hold multiple independent filesystems — one per passphrase. They don't know about each other. Nobody can prove more than one exists.
+
 ```bash
-# Passphrase A: decoy filesystem with harmless files
-darkfs mount vault.img ~/private    # enter passphrase A
-cp family-photos/*.jpg ~/private/
-umount ~/private
+# Passphrase "vacation2024" — harmless decoy files
+darkfs put vault.img beach.jpg
+darkfs put vault.img recipes.txt
 
-# Passphrase B: real sensitive data
-darkfs mount vault.img ~/private    # enter passphrase B
-cp classified.pdf ~/private/
-umount ~/private
+# Passphrase "kJ7$mQ9!xR2&nP4" — real secrets
+darkfs put vault.img accounts.xlsx
+darkfs put vault.img classified.pdf
 
-# Nobody can prove passphrase B exists.
-# Nobody can prove there are 2 filesystems.
-# If compelled to reveal a passphrase, give A.
+# If compelled to reveal a passphrase, give "vacation2024".
+# The adversary sees beach photos and recipes.
+# They cannot prove another passphrase exists.
+# They cannot prove the vault contains anything else.
 ```
+
+## How passphrases work
+
+There is no password database. Nothing is stored. The passphrase doesn't *unlock* anything — it *constructs* the filesystem.
+
+```
+passphrase → Argon2id → master_secret → HMAC → block positions + keys
+```
+
+Every passphrase deterministically generates a unique set of block positions and encryption keys. The correct passphrase generates positions that happen to contain encrypted data. A wrong passphrase generates positions that contain random noise — which is indistinguishable from "no data."
+
+This means:
+- **No "wrong password" error** — the system genuinely can't tell
+- **No password recovery** — there's nothing to recover from
+- **No proof of existence** — the vault looks identical whether it has 0 or 100 filesystems
+
+> **The golden rule: remember your passphrase.** There is no reset. There is no recovery. There is no proof it ever existed. That's the point.
 
 ## Threat Model
 
