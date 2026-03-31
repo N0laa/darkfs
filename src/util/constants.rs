@@ -1,4 +1,4 @@
-//! Global constants for the voidfs filesystem.
+//! Global constants for the darkfs filesystem.
 
 /// Size of a single block on disk, in bytes.
 pub const BLOCK_SIZE: usize = 4096;

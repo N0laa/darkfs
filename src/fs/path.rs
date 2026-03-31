@@ -5,7 +5,7 @@ pub use crate::crypto::locator::canonical_path;
 /// Return the parent directory of a canonical path.
 ///
 /// ```
-/// # use voidfs::fs::path::parent_of;
+/// # use darkfs::fs::path::parent_of;
 /// assert_eq!(parent_of("/"), "/");
 /// assert_eq!(parent_of("/foo"), "/");
 /// assert_eq!(parent_of("/foo/bar"), "/foo");
@@ -27,7 +27,7 @@ pub fn parent_of(canonical: &str) -> &str {
 /// Returns `None` if called on `"/"` (root has no filename).
 ///
 /// ```
-/// # use voidfs::fs::path::filename_of;
+/// # use darkfs::fs::path::filename_of;
 /// assert_eq!(filename_of("/foo"), Some("foo"));
 /// assert_eq!(filename_of("/foo/bar.txt"), Some("bar.txt"));
 /// assert_eq!(filename_of("/a/b/c"), Some("c"));
@@ -46,7 +46,7 @@ pub fn filename_of(canonical: &str) -> Option<&str> {
 /// Join a parent directory path with a child name.
 ///
 /// ```
-/// # use voidfs::fs::path::join_path;
+/// # use darkfs::fs::path::join_path;
 /// assert_eq!(join_path("/", "foo"), "/foo");
 /// assert_eq!(join_path("/a", "b"), "/a/b");
 /// assert_eq!(join_path("/a/b", "c"), "/a/b/c");
@@ -62,7 +62,7 @@ pub fn join_path(parent: &str, name: &str) -> String {
 /// Return the path to the `.dirindex` file for a directory.
 ///
 /// ```
-/// # use voidfs::fs::path::dirindex_path;
+/// # use darkfs::fs::path::dirindex_path;
 /// assert_eq!(dirindex_path("/"), "/.dirindex");
 /// assert_eq!(dirindex_path("/foo"), "/foo/.dirindex");
 /// assert_eq!(dirindex_path("/foo/bar"), "/foo/bar/.dirindex");

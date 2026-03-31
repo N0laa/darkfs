@@ -1,8 +1,8 @@
 //! Integration test: wrong passphrase returns empty filesystem, no error.
 
-use voidfs::crypto::kdf::{derive_master_secret, KdfPreset};
-use voidfs::fs::file::{read_file, write_file};
-use voidfs::util::constants::BLOCK_SIZE;
+use darkfs::crypto::kdf::{derive_master_secret, KdfPreset};
+use darkfs::fs::file::{read_file, write_file};
+use darkfs::util::constants::BLOCK_SIZE;
 
 use crate::common::create_random_image;
 

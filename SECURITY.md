@@ -1,4 +1,4 @@
-# voidfs Security Audit
+# darkfs Security Audit
 
 Rounds 1–3 completed 2026-03-31. Round 4 pentest completed 2026-03-31.
 Scope: crypto primitives, deniability, collision integrity, side channels, adversarial attacks, build hardening, penetration testing.
@@ -23,8 +23,8 @@ Scope: crypto primitives, deniability, collision integrity, side channels, adver
 | D1 | Static image: statistically indistinguishable from random | OK | **PASS** — verified by 14-test suite + Step 8 pentest |
 | D2 | Two-snapshot diff reveals block count (approx file size) | MEDIUM | Known limitation |
 | D3 | I/O pattern: 5-read-then-1-write per block | MEDIUM | Host-level only |
-| D4 | Process name "voidfs" visible in ps/mount | HIGH | **FIXED** — FSName now configurable |
-| D5 | VOIDFS_PASSPHRASE env var visible in /proc | HIGH | Cleared after read; documented |
+| D4 | Process name "darkfs" visible in ps/mount | HIGH | **FIXED** — FSName now configurable |
+| D5 | DARKFS_PASSPHRASE env var visible in /proc | HIGH | Cleared after read; documented |
 | D6 | Argon2id 256 MiB allocation is a behavioral signal | LOW | Inherent |
 | D7 | Wrong passphrase: all 16 slots always iterated — timing leak eliminated | OK | **FIXED** |
 
@@ -77,12 +77,12 @@ Scope: crypto primitives, deniability, collision integrity, side channels, adver
 | B2 | No network/telemetry deps | OK |
 | B3 | Release: LTO + strip enabled | OK |
 | B4 | Missing: panic=abort, codegen-units=1 | **FIXED** |
-| B5 | Binary contains "voidfs" strings | Documented |
+| B5 | Binary contains "darkfs" strings | Documented |
 | B6 | tracing_subscriber unconditionally initialized | **FIXED** — gated |
 
 ### Final Penetration Test (Step 8)
 
-Two 64MB images tested blind (one voidfs with 3 files, one pure /dev/urandom):
+Two 64MB images tested blind (one darkfs with 3 files, one pure /dev/urandom):
 
 | Test | Image A | Image B | Distinguishable? |
 |------|---------|---------|-------------------|
@@ -95,7 +95,7 @@ Two 64MB images tested blind (one voidfs with 3 files, one pure /dev/urandom):
 | Duplicate blocks | 0 | 0 | No |
 | `file` command | "data" | "data" | No |
 
-**Confidence: 0%. Cannot determine which image is voidfs. Deniability PASS.**
+**Confidence: 0%. Cannot determine which image is darkfs. Deniability PASS.**
 
 ---
 
@@ -134,7 +134,7 @@ Full automated pentest with 25+ attacks across 7 categories. All findings below 
 
 ## Deniability Verdict
 
-**At rest: PASS** — A static voidfs image is cryptographically and statistically indistinguishable from random data. Confirmed by 14-test statistical suite and blind penetration test.
+**At rest: PASS** — A static darkfs image is cryptographically and statistically indistinguishable from random data. Confirmed by 14-test statistical suite and blind penetration test.
 
 **Under observation: PARTIAL** — Behavioral fingerprints exist (I/O patterns, memory allocation, process/mount names). All require active monitoring of the running system.
 

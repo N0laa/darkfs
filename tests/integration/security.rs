@@ -8,14 +8,14 @@
 
 use rand::RngCore;
 
-use voidfs::crypto::cipher::decrypt_block;
-use voidfs::crypto::kdf::{derive_master_secret, KdfPreset};
-use voidfs::crypto::keys::derive_block_key;
-use voidfs::crypto::locator::{block_offset, canonical_path};
-use voidfs::fs::file::{read_file, write_file};
-use voidfs::fs::ops::create_file;
-use voidfs::store::image::ImageFile;
-use voidfs::util::constants::*;
+use darkfs::crypto::cipher::decrypt_block;
+use darkfs::crypto::kdf::{derive_master_secret, KdfPreset};
+use darkfs::crypto::keys::derive_block_key;
+use darkfs::crypto::locator::{block_offset, canonical_path};
+use darkfs::fs::file::{read_file, write_file};
+use darkfs::fs::ops::create_file;
+use darkfs::store::image::ImageFile;
+use darkfs::util::constants::*;
 
 use crate::common::create_random_image;
 

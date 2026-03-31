@@ -1,6 +1,6 @@
 //! Integration test: slot collision handling on a small image.
 
-use voidfs::fs::file::{read_file, write_file};
+use darkfs::fs::file::{read_file, write_file};
 
 use crate::common::create_random_image;
 

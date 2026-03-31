@@ -1,6 +1,6 @@
 //! Argon2id key derivation: passphrase → master secret.
 //!
-//! The salt is `SHA-256("voidfs-v1-{image_size}")`, derived from the image
+//! The salt is `SHA-256("darkfs-v1-{image_size}")`, derived from the image
 //! file size (not stored on disk) to preserve deniability. Two images of
 //! identical size with the same passphrase produce the same master secret.
 //!
@@ -22,7 +22,7 @@ use argon2::{Algorithm, Argon2, Params, Version};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
-use crate::util::errors::VoidError;
+use crate::util::errors::DarkError;
 
 /// Controls the cost parameters for Argon2id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,14 +35,14 @@ pub enum KdfPreset {
 
 /// Derive a 32-byte master secret from a passphrase and image size using Argon2id.
 ///
-/// The salt is `SHA-256("voidfs-v1-{image_size}")`, so no per-image salt needs
+/// The salt is `SHA-256("darkfs-v1-{image_size}")`, so no per-image salt needs
 /// to be stored on disk.
 pub fn derive_master_secret(
     passphrase: &[u8],
     image_size: u64,
     preset: KdfPreset,
-) -> Result<Zeroizing<[u8; 32]>, VoidError> {
-    let salt = Sha256::digest(format!("voidfs-v1-{image_size}").as_bytes());
+) -> Result<Zeroizing<[u8; 32]>, DarkError> {
+    let salt = Sha256::digest(format!("darkfs-v1-{image_size}").as_bytes());
 
     let (m_cost, t_cost) = match preset {
         KdfPreset::Dev => (8 * 1024, 1),    // 8 MiB, 1 iteration
@@ -50,21 +50,21 @@ pub fn derive_master_secret(
     };
 
     let params =
-        Params::new(m_cost, t_cost, 1, Some(32)).map_err(|e| VoidError::Kdf(e.to_string()))?;
+        Params::new(m_cost, t_cost, 1, Some(32)).map_err(|e| DarkError::Kdf(e.to_string()))?;
 
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
     let mut output = Zeroizing::new([0u8; 32]);
     argon2
         .hash_password_into(passphrase, &salt, output.as_mut())
-        .map_err(|e| VoidError::Kdf(e.to_string()))?;
+        .map_err(|e| DarkError::Kdf(e.to_string()))?;
 
     Ok(output)
 }
 
 /// Derive a session secret by mixing the master secret with a per-image random salt.
 ///
-/// `session_secret = HKDF-Expand(PRK from master_secret, info="voidfs-session" || random_salt)`
+/// `session_secret = HKDF-Expand(PRK from master_secret, info="darkfs-session" || random_salt)`
 ///
 /// This ensures two images with the same passphrase and size have different
 /// file encryption keys (because they have different `random_salt` values).
@@ -73,17 +73,17 @@ pub fn derive_master_secret(
 pub fn derive_session_secret(
     master_secret: &[u8; 32],
     random_salt: &[u8; 32],
-) -> Result<Zeroizing<[u8; 32]>, VoidError> {
+) -> Result<Zeroizing<[u8; 32]>, DarkError> {
     use hkdf::Hkdf;
     use sha2::Sha256;
 
     let hkdf = Hkdf::<Sha256>::new(Some(master_secret), master_secret);
     let mut session = Zeroizing::new([0u8; 32]);
     let mut info = [0u8; 14 + 32];
-    info[..14].copy_from_slice(b"voidfs-session");
+    info[..14].copy_from_slice(b"darkfs-session");
     info[14..].copy_from_slice(random_salt);
     hkdf.expand(&info, session.as_mut())
-        .map_err(|e| VoidError::Kdf(format!("HKDF expand (session): {e}")))?;
+        .map_err(|e| DarkError::Kdf(format!("HKDF expand (session): {e}")))?;
     Ok(session)
 }
 

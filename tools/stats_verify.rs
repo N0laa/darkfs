@@ -1,6 +1,6 @@
-//! stats-verify: Statistical verification that voidfs images are indistinguishable from random.
+//! stats-verify: Statistical verification that darkfs images are indistinguishable from random.
 //!
-//! Creates a voidfs image with ~100 files, then runs a battery of statistical tests
+//! Creates a darkfs image with ~100 files, then runs a battery of statistical tests
 //! comparing it against a control image of pure /dev/urandom output.
 //!
 //! Usage:
@@ -16,20 +16,20 @@ use std::path::PathBuf;
 use clap::Parser;
 use rand::RngCore;
 
-use voidfs::crypto::kdf::{derive_master_secret, KdfPreset};
-use voidfs::fs::file::write_file;
-use voidfs::store::image::ImageFile;
-use voidfs::util::constants::BLOCK_SIZE;
+use darkfs::crypto::kdf::{derive_master_secret, KdfPreset};
+use darkfs::fs::file::write_file;
+use darkfs::store::image::ImageFile;
+use darkfs::util::constants::BLOCK_SIZE;
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────
 
 #[derive(Parser)]
 #[command(
     name = "stats-verify",
-    about = "Statistical verification of voidfs deniability"
+    about = "Statistical verification of darkfs deniability"
 )]
 struct Cli {
-    /// Path to a voidfs image (created if --generate-only or if missing with default)
+    /// Path to a darkfs image (created if --generate-only or if missing with default)
     #[arg(long)]
     image: Option<PathBuf>,
 
@@ -57,8 +57,8 @@ fn create_random_image(path: &std::path::Path) {
     file.flush().expect("flush");
 }
 
-fn create_voidfs_image(path: &std::path::Path) {
-    // Start with a random image (like mkvoid)
+fn create_darkfs_image(path: &std::path::Path) {
+    // Start with a random image (like mkdark)
     create_random_image(path);
 
     let mut img = ImageFile::open(path).expect("open image");
@@ -102,7 +102,7 @@ fn create_voidfs_image(path: &std::path::Path) {
     .unwrap();
     write_file(&mut img, &secret, "/ascii.txt", b"Hello, this is a plain text file with predictable ASCII content. The quick brown fox jumps over the lazy dog. 0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz !@#$%^&*()").unwrap();
 
-    println!("  Wrote {} files to voidfs image", file_idx + 4);
+    println!("  Wrote {} files to darkfs image", file_idx + 4);
 }
 
 // ─── Test infrastructure ─────────────────────────────────────────────────────
@@ -643,15 +643,15 @@ fn main() {
 
     let image_path = cli
         .image
-        .unwrap_or_else(|| PathBuf::from("/tmp/voidfs_stats_test.img"));
+        .unwrap_or_else(|| PathBuf::from("/tmp/darkfs_stats_test.img"));
     let control_path = cli
         .control
-        .unwrap_or_else(|| PathBuf::from("/tmp/voidfs_stats_control.img"));
+        .unwrap_or_else(|| PathBuf::from("/tmp/darkfs_stats_control.img"));
 
     // Generate images if they don't exist
     if !image_path.exists() || cli.generate_only {
-        println!("Generating voidfs image at {} ...", image_path.display());
-        create_voidfs_image(&image_path);
+        println!("Generating darkfs image at {} ...", image_path.display());
+        create_darkfs_image(&image_path);
     }
     if !control_path.exists() || cli.generate_only {
         println!("Generating control image at {} ...", control_path.display());
@@ -665,18 +665,18 @@ fn main() {
 
     // Load images
     println!("Loading images...");
-    let voidfs_data = fs::read(&image_path).expect("read voidfs image");
+    let darkfs_data = fs::read(&image_path).expect("read darkfs image");
     let control_data = fs::read(&control_path).expect("read control image");
 
     assert_eq!(
-        voidfs_data.len(),
+        darkfs_data.len(),
         control_data.len(),
         "Images must be the same size"
     );
     println!(
         "Image size: {} bytes ({} blocks)\n",
-        voidfs_data.len(),
-        voidfs_data.len() / BLOCK_SIZE
+        darkfs_data.len(),
+        darkfs_data.len() / BLOCK_SIZE
     );
 
     // Run tests on control image
@@ -689,23 +689,23 @@ fn main() {
     let control_total = control_results.len();
     println!("  → {control_pass}/{control_total} passed\n");
 
-    // Run tests on voidfs image
-    println!("═══ voidfs image (with ~100 encrypted files) ═══");
-    let voidfs_results = run_all_tests(&voidfs_data, "voidfs");
-    for r in &voidfs_results {
+    // Run tests on darkfs image
+    println!("═══ darkfs image (with ~100 encrypted files) ═══");
+    let darkfs_results = run_all_tests(&darkfs_data, "darkfs");
+    for r in &darkfs_results {
         r.display();
     }
-    let voidfs_pass = voidfs_results.iter().filter(|r| r.passed).count();
-    let voidfs_total = voidfs_results.len();
-    println!("  → {voidfs_pass}/{voidfs_total} passed\n");
+    let darkfs_pass = darkfs_results.iter().filter(|r| r.passed).count();
+    let darkfs_total = darkfs_results.len();
+    println!("  → {darkfs_pass}/{darkfs_total} passed\n");
 
     // Summary
     println!("═══ DENIABILITY VERDICT ═══");
     let mut deniability_broken = false;
-    for (vr, cr) in voidfs_results.iter().zip(control_results.iter()) {
+    for (vr, cr) in darkfs_results.iter().zip(control_results.iter()) {
         if !vr.passed && cr.passed {
             println!(
-                "  ⚠ DENIABILITY BUG: {} fails on voidfs but passes on control",
+                "  ⚠ DENIABILITY BUG: {} fails on darkfs but passes on control",
                 vr.name
             );
             deniability_broken = true;
@@ -713,10 +713,10 @@ fn main() {
     }
 
     if deniability_broken {
-        println!("\n  ✗ DENIABILITY IS BROKEN — voidfs image is distinguishable from random");
+        println!("\n  ✗ DENIABILITY IS BROKEN — darkfs image is distinguishable from random");
         std::process::exit(1);
     } else {
-        println!("\n  ✓ ALL CLEAR — voidfs image is statistically indistinguishable from random");
+        println!("\n  ✓ ALL CLEAR — darkfs image is statistically indistinguishable from random");
     }
 
     // Cleanup

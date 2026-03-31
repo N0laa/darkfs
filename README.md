@@ -1,8 +1,8 @@
-# voidfs
+# darkfs
 
 **A deniable steganographic filesystem. Nothing to see here.**
 
-voidfs is a FUSE-based encrypted filesystem where the entire disk image is indistinguishable from random data. No headers, no magic bytes, no metadata, no partition table -- nothing reveals whether the image is in use or was simply filled with `/dev/urandom`.
+darkfs is a FUSE-based encrypted filesystem where the entire disk image is indistinguishable from random data. No headers, no magic bytes, no metadata, no partition table -- nothing reveals whether the image is in use or was simply filled with `/dev/urandom`.
 
 The only secret is a passphrase in your head. Everything else -- block locations, encryption keys, directory structure -- is deterministically derived from that passphrase.
 
@@ -21,19 +21,19 @@ The only secret is a passphrase in your head. Everything else -- block locations
 cargo build --features fuse --release
 
 # Create a 2 GiB vault (filled with random data)
-voidfs create vault.img 2G
+darkfs create vault.img 2G
 
 # Store a file (enter passphrase when prompted)
-voidfs put vault.img secret.pdf
+darkfs put vault.img secret.pdf
 
 # Retrieve a file
-voidfs get vault.img secret.pdf .
+darkfs get vault.img secret.pdf .
 
 # List files
-voidfs ls vault.img
+darkfs ls vault.img
 
 # Or mount with FUSE (requires --features fuse)
-voidfs mount vault.img ~/private
+darkfs mount vault.img ~/private
 cp document.pdf ~/private/
 ls ~/private/
 umount ~/private
@@ -61,60 +61,60 @@ cargo build --release
 
 ## Commands
 
-### `voidfs create` -- Create a vault
+### `darkfs create` -- Create a vault
 
 ```bash
-voidfs create vault.img 500M
-voidfs create vault.img 2G
+darkfs create vault.img 500M
+darkfs create vault.img 2G
 ```
 
-### `voidfs mount` -- Mount as FUSE filesystem
+### `darkfs mount` -- Mount as FUSE filesystem
 
 ```bash
-voidfs mount vault.img ~/private
+darkfs mount vault.img ~/private
 ```
 
-### `voidfs unmount` -- Unmount
+### `darkfs unmount` -- Unmount
 
 ```bash
-voidfs unmount ~/private
+darkfs unmount ~/private
 # or: umount ~/private
 ```
 
-### `voidfs info` -- Show vault info
+### `darkfs info` -- Show vault info
 
 ```bash
-voidfs info vault.img
+darkfs info vault.img
 ```
 
 Requires the correct passphrase. Shows file count, directory count, data stored, and a file listing.
 
-### `voidfs put` / `voidfs get` -- Direct vault access
+### `darkfs put` / `darkfs get` -- Direct vault access
 
 ```bash
 # Store a file without mounting
-voidfs put vault.img secret.txt
+darkfs put vault.img secret.txt
 
 # Retrieve a file without mounting
-voidfs get vault.img secret.txt .
+darkfs get vault.img secret.txt .
 
 # List files
-voidfs ls vault.img
+darkfs ls vault.img
 
 # Delete a file
-voidfs rm vault.img secret.txt
+darkfs rm vault.img secret.txt
 ```
 
 ## Multiple Passphrases (Deniability)
 
 ```bash
 # Passphrase A: decoy filesystem with harmless files
-voidfs mount vault.img ~/private    # enter passphrase A
+darkfs mount vault.img ~/private    # enter passphrase A
 cp family-photos/*.jpg ~/private/
 umount ~/private
 
 # Passphrase B: real sensitive data
-voidfs mount vault.img ~/private    # enter passphrase B
+darkfs mount vault.img ~/private    # enter passphrase B
 cp classified.pdf ~/private/
 umount ~/private
 
@@ -125,18 +125,18 @@ umount ~/private
 
 ## Threat Model
 
-### What voidfs protects against
+### What darkfs protects against
 
 - **Disk seizure**: An attacker with the image file cannot determine if it contains data or is random noise.
 - **Compelled disclosure**: You can reveal a decoy passphrase. The attacker cannot prove another passphrase exists.
 - **Forensic analysis**: No headers, magic bytes, partition tables, or statistical anomalies.
 
-### What voidfs does NOT protect against
+### What darkfs does NOT protect against
 
-- **Active surveillance**: An attacker watching your system while voidfs is running can observe I/O patterns, memory allocation (Argon2id uses 256 MiB), and the process name.
+- **Active surveillance**: An attacker watching your system while darkfs is running can observe I/O patterns, memory allocation (Argon2id uses 256 MiB), and the process name.
 - **Multi-snapshot analysis**: An attacker comparing two copies of the image can see which blocks changed. Decoy writes and tier-based I/O padding limit what is revealed, but approximate file size (within tier boundaries) is still observable.
 - **Weak passphrases**: Use 12+ characters with high entropy. The deterministic salt (derived from image size) means dictionary attacks are amortized across all users with the same image size.
-- **Rubber-hose cryptanalysis**: voidfs provides plausible deniability, not resistance to physical coercion.
+- **Rubber-hose cryptanalysis**: darkfs provides plausible deniability, not resistance to physical coercion.
 
 ### Crypto Stack
 
@@ -161,7 +161,7 @@ Benchmarks on Apple M-series (release build):
 
 ## Comparison with Existing Tools
 
-| Feature | voidfs | VeraCrypt Hidden Volume | StegFS | Artifice |
+| Feature | darkfs | VeraCrypt Hidden Volume | StegFS | Artifice |
 |---------|--------|------------------------|--------|----------|
 | IS the filesystem | Yes | No (hides inside another) | No (hides in free space) | No (hides in free space) |
 | Multiple passphrases | Unlimited | 2 (outer + hidden) | Limited | Limited |

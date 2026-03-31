@@ -14,15 +14,15 @@ use crate::fs::path::{canonical_path, dirindex_path, filename_of, join_path, par
 use crate::store::image::ImageFile;
 use crate::store::slots::{erase_slot, read_slot};
 use crate::util::constants::{HEADER_SIZE, MAX_SLOTS};
-use crate::util::errors::{VoidError, VoidResult};
+use crate::util::errors::{DarkError, DarkResult};
 
 /// Names reserved for internal use that cannot be used as filenames.
 const RESERVED_NAMES: &[&str] = &[".dirindex"];
 
 /// Check if a filename is reserved.
-fn reject_reserved(name: &str) -> VoidResult<()> {
+fn reject_reserved(name: &str) -> DarkResult<()> {
     if RESERVED_NAMES.contains(&name) {
-        return Err(VoidError::ReservedName {
+        return Err(DarkError::ReservedName {
             name: name.to_string(),
         });
     }
@@ -39,15 +39,15 @@ pub fn create_file(
     master_secret: &[u8; 32],
     path: &str,
     data: &[u8],
-) -> VoidResult<()> {
+) -> DarkResult<()> {
     let canon = canonical_path(path);
     if canon == "/" {
-        return Err(VoidError::InvalidOperation {
+        return Err(DarkError::InvalidOperation {
             reason: "cannot create file at root path".to_string(),
         });
     }
     let parent = parent_of(&canon);
-    let name = filename_of(&canon).ok_or_else(|| VoidError::InvalidOperation {
+    let name = filename_of(&canon).ok_or_else(|| DarkError::InvalidOperation {
         reason: "cannot create file at root path".to_string(),
     })?;
     reject_reserved(name)?;
@@ -71,26 +71,26 @@ pub fn read_file_data(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
     path: &str,
-) -> VoidResult<Option<Zeroizing<Vec<u8>>>> {
+) -> DarkResult<Option<Zeroizing<Vec<u8>>>> {
     let canon = canonical_path(path);
     read_file(image, master_secret, &canon)
 }
 
 /// Delete a file: overwrite its blocks with random data and remove from parent index.
-pub fn delete_file(image: &mut ImageFile, master_secret: &[u8; 32], path: &str) -> VoidResult<()> {
+pub fn delete_file(image: &mut ImageFile, master_secret: &[u8; 32], path: &str) -> DarkResult<()> {
     let canon = canonical_path(path);
     if canon == "/" {
-        return Err(VoidError::InvalidOperation {
+        return Err(DarkError::InvalidOperation {
             reason: "cannot delete root".to_string(),
         });
     }
     let parent = parent_of(&canon);
-    let name = filename_of(&canon).ok_or(VoidError::FileNotFound)?;
+    let name = filename_of(&canon).ok_or(DarkError::FileNotFound)?;
 
     // Read the file header to find block count
     let block_count = match read_file_block_count(image, master_secret, &canon)? {
         Some(count) => count,
-        None => return Err(VoidError::FileNotFound),
+        None => return Err(DarkError::FileNotFound),
     };
 
     // Erase all blocks with random data
@@ -109,7 +109,7 @@ pub fn delete_file(image: &mut ImageFile, master_secret: &[u8; 32], path: &str) 
 /// Create a directory: write an empty `.dirindex` and add to parent index.
 ///
 /// The root directory `/` is implicit and does not need to be created.
-pub fn mkdir(image: &mut ImageFile, master_secret: &[u8; 32], path: &str) -> VoidResult<()> {
+pub fn mkdir(image: &mut ImageFile, master_secret: &[u8; 32], path: &str) -> DarkResult<()> {
     let canon = canonical_path(path);
     if canon == "/" {
         // Root always exists implicitly; create its dirindex if missing
@@ -119,7 +119,7 @@ pub fn mkdir(image: &mut ImageFile, master_secret: &[u8; 32], path: &str) -> Voi
     }
 
     let parent = parent_of(&canon);
-    let name = filename_of(&canon).ok_or_else(|| VoidError::InvalidOperation {
+    let name = filename_of(&canon).ok_or_else(|| DarkError::InvalidOperation {
         reason: "cannot create directory at root path".to_string(),
     })?;
     reject_reserved(name)?;
@@ -127,7 +127,7 @@ pub fn mkdir(image: &mut ImageFile, master_secret: &[u8; 32], path: &str) -> Voi
     // Check if already exists in parent
     let mut parent_idx = read_dirindex(image, master_secret, parent)?;
     if parent_idx.contains(name) {
-        return Err(VoidError::AlreadyExists {
+        return Err(DarkError::AlreadyExists {
             path: canon.to_string(),
         });
     }
@@ -146,23 +146,23 @@ pub fn mkdir(image: &mut ImageFile, master_secret: &[u8; 32], path: &str) -> Voi
 /// Remove an empty directory.
 ///
 /// Returns an error if the directory is not empty or doesn't exist.
-pub fn rmdir(image: &mut ImageFile, master_secret: &[u8; 32], path: &str) -> VoidResult<()> {
+pub fn rmdir(image: &mut ImageFile, master_secret: &[u8; 32], path: &str) -> DarkResult<()> {
     let canon = canonical_path(path);
     if canon == "/" {
-        return Err(VoidError::InvalidOperation {
+        return Err(DarkError::InvalidOperation {
             reason: "cannot remove root directory".to_string(),
         });
     }
 
     let parent = parent_of(&canon);
-    let name = filename_of(&canon).ok_or_else(|| VoidError::InvalidOperation {
+    let name = filename_of(&canon).ok_or_else(|| DarkError::InvalidOperation {
         reason: "cannot remove root directory".to_string(),
     })?;
 
     // Check that directory exists and is empty
     let dir_idx = read_dirindex(image, master_secret, &canon)?;
     if !dir_idx.entries.is_empty() {
-        return Err(VoidError::DirectoryNotEmpty {
+        return Err(DarkError::DirectoryNotEmpty {
             path: canon.to_string(),
         });
     }
@@ -191,7 +191,7 @@ pub fn list_dir(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
     path: &str,
-) -> VoidResult<DirIndex> {
+) -> DarkResult<DirIndex> {
     let canon = canonical_path(path);
     read_dirindex(image, master_secret, &canon)
 }
@@ -203,7 +203,7 @@ pub fn stat(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
     path: &str,
-) -> VoidResult<Option<FileHeader>> {
+) -> DarkResult<Option<FileHeader>> {
     let canon = canonical_path(path);
     let payload0 = match read_slot(image, master_secret, &canon, 0)? {
         Some(p) => p,
@@ -215,7 +215,7 @@ pub fn stat(
         .expect("slice is HEADER_SIZE");
     match FileHeader::from_bytes(&header_bytes) {
         Ok(h) => Ok(Some(h)),
-        Err(VoidError::InvalidMagic) => Ok(None),
+        Err(DarkError::InvalidMagic) => Ok(None),
         Err(e) => Err(e),
     }
 }
@@ -225,7 +225,7 @@ fn read_file_block_count(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
     canonical: &str,
-) -> VoidResult<Option<u32>> {
+) -> DarkResult<Option<u32>> {
     let payload0 = match read_slot(image, master_secret, canonical, 0)? {
         Some(p) => p,
         None => return Ok(None),
@@ -236,7 +236,7 @@ fn read_file_block_count(
         .expect("slice is HEADER_SIZE");
     match FileHeader::from_bytes(&header_bytes) {
         Ok(h) => Ok(Some(h.block_count)),
-        Err(VoidError::InvalidMagic) => Ok(None),
+        Err(DarkError::InvalidMagic) => Ok(None),
         Err(e) => Err(e),
     }
 }
@@ -255,7 +255,7 @@ pub struct FsInfo {
 }
 
 /// Walk the filesystem tree and gather statistics.
-pub fn fs_info(image: &mut ImageFile, master_secret: &[u8; 32]) -> VoidResult<FsInfo> {
+pub fn fs_info(image: &mut ImageFile, master_secret: &[u8; 32]) -> DarkResult<FsInfo> {
     let mut info = FsInfo::default();
     walk_dir_for_info(image, master_secret, "/", &mut info)?;
     Ok(info)
@@ -266,7 +266,7 @@ fn walk_dir_for_info(
     master_secret: &[u8; 32],
     dir: &str,
     info: &mut FsInfo,
-) -> VoidResult<()> {
+) -> DarkResult<()> {
     let dir_idx = read_dirindex(image, master_secret, dir)?;
 
     for entry in &dir_idx.entries {
@@ -294,7 +294,7 @@ fn walk_dir_for_info(
 pub fn tree(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
-) -> VoidResult<Vec<(String, FileType, u64)>> {
+) -> DarkResult<Vec<(String, FileType, u64)>> {
     let mut entries = Vec::new();
     walk_dir_for_tree(image, master_secret, "/", &mut entries)?;
     Ok(entries)
@@ -305,7 +305,7 @@ fn walk_dir_for_tree(
     master_secret: &[u8; 32],
     dir: &str,
     entries: &mut Vec<(String, FileType, u64)>,
-) -> VoidResult<()> {
+) -> DarkResult<()> {
     let dir_idx = read_dirindex(image, master_secret, dir)?;
 
     for entry in &dir_idx.entries {
@@ -337,7 +337,7 @@ fn walk_dir_for_tree(
 pub fn populate_claims(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
-) -> VoidResult<()> {
+) -> DarkResult<()> {
     walk_dir_for_claims(image, master_secret, "/")
 }
 
@@ -345,7 +345,7 @@ fn walk_dir_for_claims(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
     dir: &str,
-) -> VoidResult<()> {
+) -> DarkResult<()> {
     // Claim blocks for this directory's .dirindex file
     let idx_path = dirindex_path(dir);
     claim_file_blocks(image, master_secret, &idx_path)?;
@@ -375,7 +375,7 @@ fn claim_file_blocks(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
     canonical: &str,
-) -> VoidResult<()> {
+) -> DarkResult<()> {
     // Read block 0 to discover the file and get block_count
     let block_count = match read_file_block_count(image, master_secret, canonical)? {
         Some(count) => count,
@@ -405,7 +405,7 @@ pub fn rmdir_recursive(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
     path: &str,
-) -> VoidResult<()> {
+) -> DarkResult<()> {
     let canon = canonical_path(path);
 
     // Read directory contents

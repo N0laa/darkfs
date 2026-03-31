@@ -8,7 +8,7 @@ use std::io::Cursor;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::util::constants::{HEADER_SIZE, MAGIC};
-use crate::util::errors::VoidError;
+use crate::util::errors::DarkError;
 
 /// Metadata for a single file, stored inline in block 0.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,15 +58,15 @@ impl FileHeader {
 
     /// Deserialize a header from exactly [`HEADER_SIZE`] bytes.
     ///
-    /// Returns [`VoidError::InvalidMagic`] if the magic bytes don't match,
+    /// Returns [`DarkError::InvalidMagic`] if the magic bytes don't match,
     /// which indicates a failed decryption (wrong passphrase) or corrupt data.
-    pub fn from_bytes(data: &[u8; HEADER_SIZE]) -> Result<Self, VoidError> {
+    pub fn from_bytes(data: &[u8; HEADER_SIZE]) -> Result<Self, DarkError> {
         let mut cursor = Cursor::new(data);
 
         let mut magic = [0u8; 8];
         std::io::Read::read_exact(&mut cursor, &mut magic).unwrap();
         if magic != MAGIC {
-            return Err(VoidError::InvalidMagic);
+            return Err(DarkError::InvalidMagic);
         }
 
         let version = cursor.read_u8().unwrap();
@@ -131,7 +131,7 @@ mod tests {
         let mut bytes = [0u8; HEADER_SIZE];
         bytes[0] = 0xFF; // corrupt magic
         let result = FileHeader::from_bytes(&bytes);
-        assert!(matches!(result, Err(VoidError::InvalidMagic)));
+        assert!(matches!(result, Err(DarkError::InvalidMagic)));
     }
 
     #[test]

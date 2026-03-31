@@ -13,16 +13,16 @@ use crate::fs::inode::FileHeader;
 use crate::store::image::ImageFile;
 use crate::store::slots::{erase_slot, erase_slot_at, read_slot, write_slot_cow};
 use crate::util::constants::{tier_block_count, DATA_IN_BLOCK0, DATA_IN_BLOCKN, HEADER_SIZE, PAYLOAD_SIZE};
-use crate::util::errors::{VoidError, VoidResult};
+use crate::util::errors::{DarkError, DarkResult};
 
 /// Maximum file size: limited by u32 block_count in the header.
 /// 1 header block + (u32::MAX - 1) data blocks * 4080 bytes each.
 const MAX_FILE_SIZE: u64 = DATA_IN_BLOCK0 as u64 + (u32::MAX as u64 - 1) * DATA_IN_BLOCKN as u64;
 
 /// Compute the number of blocks needed to store `data_len` bytes.
-fn compute_block_count(data_len: usize) -> VoidResult<u32> {
+fn compute_block_count(data_len: usize) -> DarkResult<u32> {
     if data_len as u64 > MAX_FILE_SIZE {
-        return Err(VoidError::FileTooLarge {
+        return Err(DarkError::FileTooLarge {
             size: data_len as u64,
             max: MAX_FILE_SIZE,
         });
@@ -50,7 +50,7 @@ pub fn write_file(
     master_secret: &[u8; 32],
     path: &str,
     data: &[u8],
-) -> VoidResult<()> {
+) -> DarkResult<()> {
     let canon = canonical_path(path);
     let block_count = compute_block_count(data.len())?;
 
@@ -143,7 +143,7 @@ fn read_block_count_from_header(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
     canonical: &str,
-) -> VoidResult<Option<u32>> {
+) -> DarkResult<Option<u32>> {
     let payload0 = match read_slot(image, master_secret, canonical, 0)? {
         Some(p) => p,
         None => return Ok(None),
@@ -153,7 +153,7 @@ fn read_block_count_from_header(
         .expect("slice is HEADER_SIZE");
     match FileHeader::from_bytes(&header_bytes) {
         Ok(h) => Ok(Some(h.block_count)),
-        Err(VoidError::InvalidMagic) => Ok(None),
+        Err(DarkError::InvalidMagic) => Ok(None),
         Err(e) => Err(e),
     }
 }
@@ -175,7 +175,7 @@ pub fn read_file(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
     path: &str,
-) -> VoidResult<Option<Zeroizing<Vec<u8>>>> {
+) -> DarkResult<Option<Zeroizing<Vec<u8>>>> {
     let canon = canonical_path(path);
 
     // Read block 0
@@ -190,7 +190,7 @@ pub fn read_file(
         .expect("slice is HEADER_SIZE");
     let header = match FileHeader::from_bytes(&header_bytes) {
         Ok(h) => h,
-        Err(VoidError::InvalidMagic) => return Ok(None),
+        Err(DarkError::InvalidMagic) => return Ok(None),
         Err(e) => return Err(e),
     };
 
@@ -219,7 +219,7 @@ pub fn read_file(
 
         if block_num < actual_blocks {
             // Real data block — must exist
-            let payload = slot_result.ok_or(VoidError::CorruptFile {
+            let payload = slot_result.ok_or(DarkError::CorruptFile {
                 path: canon.clone(),
                 block_num,
             })?;
@@ -288,7 +288,7 @@ mod tests {
     fn roundtrip_small() {
         let (_tmp, mut img) = create_random_image(64);
         let secret = [42u8; 32];
-        let content = b"hello, voidfs!";
+        let content = b"hello, darkfs!";
 
         write_file(&mut img, &secret, "/hello.txt", content).unwrap();
         let data = read_file(&mut img, &secret, "/hello.txt").unwrap().unwrap();

@@ -1,4 +1,4 @@
-# voidfs Architecture
+# darkfs Architecture
 
 ## Design Principle
 
@@ -38,22 +38,22 @@
 passphrase (user's head)
     |
     v
-Argon2id(passphrase, salt=SHA256("voidfs-v1-{image_size}"), m=256MB, t=4)
+Argon2id(passphrase, salt=SHA256("darkfs-v1-{image_size}"), m=256MB, t=4)
     |
     v
 master_secret: [u8; 32]    <-- Zeroizing, never written to disk
     |
-    +---> superblock_offset = HMAC-SHA256(master_secret, "voidfs-superblock") % total_blocks
+    +---> superblock_offset = HMAC-SHA256(master_secret, "darkfs-superblock") % total_blocks
     |
-    +---> superblock_key = HKDF-Expand(master_secret, "voidfs-superblock-key")
+    +---> superblock_key = HKDF-Expand(master_secret, "darkfs-superblock-key")
     |         --> decrypts the superblock to recover random_salt
     |
-    +---> session_secret = HKDF-Expand(master_secret, "voidfs-session" || random_salt)
+    +---> session_secret = HKDF-Expand(master_secret, "darkfs-session" || random_salt)
               |
               +---> block_offset = HMAC-SHA256(session_secret, len(path) || path || block_num || slot)
               |         --> disk block offset (where to read/write)
               |
-              +---> block_key = HKDF-Expand(session_secret, "voidfs-block-key" || ... || epoch)
+              +---> block_key = HKDF-Expand(session_secret, "darkfs-block-key" || ... || epoch)
                         --> 32-byte XChaCha20 key (per block)
 ```
 
@@ -181,7 +181,7 @@ If a crash occurs:
 
 ## FUSE Handler
 
-The FUSE handler (`fuse/handler.rs`) bridges between FUSE's inode-based API and voidfs's path-based storage:
+The FUSE handler (`fuse/handler.rs`) bridges between FUSE's inode-based API and darkfs's path-based storage:
 
 - **Inode table**: In-memory `HashMap<u64, String>` mapping inode numbers to canonical paths. Built lazily as the kernel looks up entries.
 - **Buffered I/O**: Files are loaded into memory on `open()`, modifications are buffered, and the entire file is re-encrypted and written on `release()` (close). This avoids partial-block writes but limits file size to available RAM.
@@ -197,7 +197,7 @@ The FUSE handler (`fuse/handler.rs`) bridges between FUSE's inode-based API and 
 ### What an attacker can do with the source code
 - Compute HMAC locations for guessed passphrases
 - Brute-force Argon2id (mitigated by 256 MiB memory cost)
-- Observe that the binary is named "voidfs" (if found on the system)
+- Observe that the binary is named "darkfs" (if found on the system)
 
 ### What an attacker can learn from multiple snapshots
 - Which blocks changed between snapshots — but 8+ blocks change per operation (decoy writes), so the superblock cannot be identified

@@ -381,6 +381,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "darkfs"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "bincode",
+ "byteorder",
+ "chacha20poly1305",
+ "clap",
+ "criterion",
+ "fs2",
+ "fuser",
+ "hkdf",
+ "hmac",
+ "libc",
+ "proptest",
+ "rand 0.8.5",
+ "rpassword",
+ "serde",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "zeroize",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1198,31 +1223,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "voidfs"
-version = "0.1.0"
-dependencies = [
- "argon2",
- "bincode",
- "byteorder",
- "chacha20poly1305",
- "clap",
- "criterion",
- "fs2",
- "fuser",
- "hkdf",
- "hmac",
- "libc",
- "proptest",
- "rand 0.8.5",
- "rpassword",
- "serde",
- "sha2",
- "tempfile",
- "thiserror",
- "zeroize",
-]
 
 [[package]]
 name = "wait-timeout"

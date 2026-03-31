@@ -22,7 +22,7 @@ use hkdf::Hkdf;
 use crate::crypto::cipher::{decrypt_block, encrypt_block};
 use crate::store::image::ImageFile;
 use crate::util::constants::PAYLOAD_SIZE;
-use crate::util::errors::{VoidError, VoidResult};
+use crate::util::errors::{DarkError, DarkResult};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -117,18 +117,18 @@ impl Superblock {
 pub fn superblock_offset(master_secret: &[u8; 32], total_blocks: u64) -> u64 {
     let mut mac = HmacSha256::new_from_slice(master_secret)
         .expect("HMAC accepts any key length");
-    mac.update(b"voidfs-superblock");
+    mac.update(b"darkfs-superblock");
     let result = mac.finalize().into_bytes();
     let hash_bytes: [u8; 8] = result[..8].try_into().expect("8 bytes");
     u64::from_le_bytes(hash_bytes) % total_blocks
 }
 
 /// Derive the encryption key used for the superblock (distinct from file keys).
-fn derive_superblock_key(master_secret: &[u8; 32]) -> Result<Zeroizing<[u8; 32]>, VoidError> {
+fn derive_superblock_key(master_secret: &[u8; 32]) -> Result<Zeroizing<[u8; 32]>, DarkError> {
     let hkdf = Hkdf::<Sha256>::new(Some(master_secret), master_secret);
     let mut key = Zeroizing::new([0u8; 32]);
-    hkdf.expand(b"voidfs-superblock-key", key.as_mut())
-        .map_err(|e| VoidError::Kdf(format!("HKDF expand (superblock): {e}")))?;
+    hkdf.expand(b"darkfs-superblock-key", key.as_mut())
+        .map_err(|e| DarkError::Kdf(format!("HKDF expand (superblock): {e}")))?;
     Ok(key)
 }
 
@@ -136,7 +136,7 @@ fn derive_superblock_key(master_secret: &[u8; 32]) -> Result<Zeroizing<[u8; 32]>
 fn compute_integrity(master_secret: &[u8; 32], data: &[u8]) -> [u8; 32] {
     let mut mac = HmacSha256::new_from_slice(master_secret)
         .expect("HMAC accepts any key length");
-    mac.update(b"voidfs-superblock-integrity");
+    mac.update(b"darkfs-superblock-integrity");
     mac.update(data);
     let result = mac.finalize().into_bytes();
     let mut out = [0u8; 32];
@@ -148,9 +148,9 @@ fn compute_integrity(master_secret: &[u8; 32], data: &[u8]) -> [u8; 32] {
 fn serialize_superblock(
     master_secret: &[u8; 32],
     sb: &Superblock,
-) -> Result<[u8; PAYLOAD_SIZE], VoidError> {
+) -> Result<[u8; PAYLOAD_SIZE], DarkError> {
     if sb.slot_map.len() > MAX_SLOT_ENTRIES {
-        return Err(VoidError::SuperblockFull {
+        return Err(DarkError::SuperblockFull {
             max_entries: MAX_SLOT_ENTRIES,
         });
     }
@@ -198,12 +198,12 @@ fn serialize_superblock(
 fn deserialize_superblock(
     master_secret: &[u8; 32],
     buf: &[u8; PAYLOAD_SIZE],
-) -> Result<Superblock, VoidError> {
+) -> Result<Superblock, DarkError> {
     let mut pos = 0;
 
     // Check magic
     if buf[pos..pos + 4] != SB_MAGIC {
-        return Err(VoidError::InvalidMagic);
+        return Err(DarkError::InvalidMagic);
     }
     pos += 4;
 
@@ -230,13 +230,13 @@ fn deserialize_superblock(
     pos += 4;
 
     if entry_count > MAX_SLOT_ENTRIES {
-        return Err(VoidError::SuperblockCorrupt);
+        return Err(DarkError::SuperblockCorrupt);
     }
 
     let mut slot_map = Vec::with_capacity(entry_count);
     for _ in 0..entry_count {
         if pos + SLOT_ENTRY_SIZE > PAYLOAD_SIZE - INTEGRITY_SIZE {
-            return Err(VoidError::SuperblockCorrupt);
+            return Err(DarkError::SuperblockCorrupt);
         }
         let path_hash = u64::from_le_bytes(buf[pos..pos + 8].try_into().unwrap());
         pos += 8;
@@ -251,7 +251,7 @@ fn deserialize_superblock(
     let expected = compute_integrity(master_secret, &buf[..pos]);
     let actual = &buf[pos..pos + 32];
     if expected != actual {
-        return Err(VoidError::SuperblockCorrupt);
+        return Err(DarkError::SuperblockCorrupt);
     }
 
     Ok(Superblock {
@@ -268,14 +268,14 @@ fn deserialize_superblock(
 pub fn read_superblock(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
-) -> VoidResult<Option<Superblock>> {
+) -> DarkResult<Option<Superblock>> {
     let offset = superblock_offset(master_secret, image.total_blocks());
     let raw = image.read_block(offset)?;
 
     let key = derive_superblock_key(master_secret)?;
     let payload = match decrypt_block(&key, &raw) {
         Ok(p) => p,
-        Err(VoidError::Decrypt) => return Ok(None), // no superblock yet
+        Err(DarkError::Decrypt) => return Ok(None), // no superblock yet
         Err(e) => return Err(e),
     };
 
@@ -285,7 +285,7 @@ pub fn read_superblock(
             image.claim_offset(offset);
             Ok(Some(sb))
         }
-        Err(VoidError::InvalidMagic) => Ok(None),
+        Err(DarkError::InvalidMagic) => Ok(None),
         Err(e) => Err(e),
     }
 }
@@ -308,7 +308,7 @@ fn decoy_offsets(master_secret: &[u8; 32], total_blocks: u64) -> Vec<u64> {
         }
         let mut mac = HmacSha256::new_from_slice(master_secret)
             .expect("HMAC accepts any key length");
-        mac.update(b"voidfs-decoy");
+        mac.update(b"darkfs-decoy");
         mac.update(&i.to_le_bytes());
         let result = mac.finalize().into_bytes();
         let hash_bytes: [u8; 8] = result[..8].try_into().expect("8 bytes");
@@ -329,7 +329,7 @@ pub fn write_superblock(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
     sb: &Superblock,
-) -> VoidResult<()> {
+) -> DarkResult<()> {
     let offset = superblock_offset(master_secret, image.total_blocks());
     let key = derive_superblock_key(master_secret)?;
     let payload = serialize_superblock(master_secret, sb)?;
@@ -358,7 +358,7 @@ pub fn write_superblock(
 pub fn path_hash(secret: &[u8; 32], canonical_path: &str) -> u64 {
     let mut mac = HmacSha256::new_from_slice(secret)
         .expect("HMAC accepts any key length");
-    mac.update(b"voidfs-path-hash");
+    mac.update(b"darkfs-path-hash");
     mac.update(canonical_path.as_bytes());
     let result = mac.finalize().into_bytes();
     u64::from_le_bytes(result[..8].try_into().unwrap())
@@ -433,7 +433,7 @@ mod tests {
         payload[44] ^= 0xFF;
 
         let result = deserialize_superblock(&master, &payload);
-        assert!(matches!(result, Err(VoidError::SuperblockCorrupt)));
+        assert!(matches!(result, Err(DarkError::SuperblockCorrupt)));
     }
 
     #[test]

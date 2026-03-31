@@ -12,7 +12,7 @@ use rand::RngCore;
 use zeroize::Zeroize;
 
 use crate::util::constants::{BLOCK_SIZE, NONCE_SIZE, PAYLOAD_SIZE};
-use crate::util::errors::VoidError;
+use crate::util::errors::DarkError;
 
 /// Encrypt a plaintext payload into a full disk block.
 ///
@@ -21,7 +21,7 @@ use crate::util::errors::VoidError;
 pub fn encrypt_block(
     key: &[u8; 32],
     plaintext: &[u8; PAYLOAD_SIZE],
-) -> Result<[u8; BLOCK_SIZE], VoidError> {
+) -> Result<[u8; BLOCK_SIZE], DarkError> {
     let mut nonce_bytes = [0u8; NONCE_SIZE];
     rand::thread_rng().fill_bytes(&mut nonce_bytes);
     let xnonce = XNonce::from_slice(&nonce_bytes);
@@ -29,7 +29,7 @@ pub fn encrypt_block(
     let cipher = XChaCha20Poly1305::new(key.into());
     let ciphertext = cipher
         .encrypt(xnonce, plaintext.as_ref())
-        .map_err(|_| VoidError::Encrypt)?;
+        .map_err(|_| DarkError::Encrypt)?;
 
     let mut block = [0u8; BLOCK_SIZE];
     block[..NONCE_SIZE].copy_from_slice(&nonce_bytes);
@@ -41,11 +41,11 @@ pub fn encrypt_block(
 ///
 /// Extracts the 24-byte nonce from the block prefix, then decrypts.
 /// Input: 4096-byte block. Output: 4056-byte plaintext.
-/// Returns [`VoidError::Decrypt`] if authentication fails (wrong key, tampered data).
+/// Returns [`DarkError::Decrypt`] if authentication fails (wrong key, tampered data).
 pub fn decrypt_block(
     key: &[u8; 32],
     block: &[u8; BLOCK_SIZE],
-) -> Result<[u8; PAYLOAD_SIZE], VoidError> {
+) -> Result<[u8; PAYLOAD_SIZE], DarkError> {
     let nonce_bytes: [u8; NONCE_SIZE] = block[..NONCE_SIZE]
         .try_into()
         .expect("slice is NONCE_SIZE");
@@ -54,7 +54,7 @@ pub fn decrypt_block(
     let cipher = XChaCha20Poly1305::new(key.into());
     let mut plaintext = cipher
         .decrypt(xnonce, &block[NONCE_SIZE..])
-        .map_err(|_| VoidError::Decrypt)?;
+        .map_err(|_| DarkError::Decrypt)?;
 
     let mut payload = [0u8; PAYLOAD_SIZE];
     payload.copy_from_slice(&plaintext);
@@ -96,7 +96,7 @@ mod tests {
 
         let wrong_key = [99u8; 32];
         let result = decrypt_block(&wrong_key, &encrypted);
-        assert!(matches!(result, Err(VoidError::Decrypt)));
+        assert!(matches!(result, Err(DarkError::Decrypt)));
     }
 
     #[test]
@@ -108,7 +108,7 @@ mod tests {
         encrypted[NONCE_SIZE] ^= 0xFF; // flip a byte in the ciphertext
 
         let result = decrypt_block(&key, &encrypted);
-        assert!(matches!(result, Err(VoidError::Decrypt)));
+        assert!(matches!(result, Err(DarkError::Decrypt)));
     }
 
     #[test]
@@ -118,7 +118,7 @@ mod tests {
         rand::thread_rng().fill_bytes(&mut random_block);
 
         let result = decrypt_block(&key, &random_block);
-        assert!(matches!(result, Err(VoidError::Decrypt)));
+        assert!(matches!(result, Err(DarkError::Decrypt)));
     }
 
     #[test]

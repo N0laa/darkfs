@@ -9,7 +9,7 @@ use sha2::Sha256;
 use zeroize::Zeroizing;
 
 use crate::util::constants::KEY_SIZE;
-use crate::util::errors::VoidError;
+use crate::util::errors::DarkError;
 
 /// Derive a unique encryption key for a specific block of a file.
 ///
@@ -24,7 +24,7 @@ pub fn derive_block_key(
     master_secret: &[u8; 32],
     canonical_path: &str,
     block_num: u64,
-) -> Result<Zeroizing<[u8; KEY_SIZE]>, VoidError> {
+) -> Result<Zeroizing<[u8; KEY_SIZE]>, DarkError> {
     derive_block_key_with_epoch(master_secret, canonical_path, block_num, 0)
 }
 
@@ -34,19 +34,19 @@ pub fn derive_block_key_with_epoch(
     canonical_path: &str,
     block_num: u64,
     epoch: u64,
-) -> Result<Zeroizing<[u8; KEY_SIZE]>, VoidError> {
+) -> Result<Zeroizing<[u8; KEY_SIZE]>, DarkError> {
     let hkdf = Hkdf::<Sha256>::new(Some(master_secret), master_secret);
 
     let mut key = Zeroizing::new([0u8; KEY_SIZE]);
     let mut key_info = Vec::with_capacity(16 + 4 + canonical_path.len() + 8 + 5 + 8);
-    key_info.extend_from_slice(b"voidfs-block-key");
+    key_info.extend_from_slice(b"darkfs-block-key");
     key_info.extend_from_slice(&(canonical_path.len() as u32).to_le_bytes());
     key_info.extend_from_slice(canonical_path.as_bytes());
     key_info.extend_from_slice(&block_num.to_le_bytes());
     key_info.extend_from_slice(b"epoch");
     key_info.extend_from_slice(&epoch.to_le_bytes());
     hkdf.expand(&key_info, key.as_mut())
-        .map_err(|e| VoidError::Kdf(format!("HKDF expand (key): {e}")))?;
+        .map_err(|e| DarkError::Kdf(format!("HKDF expand (key): {e}")))?;
 
     Ok(key)
 }

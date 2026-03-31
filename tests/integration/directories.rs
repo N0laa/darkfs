@@ -1,10 +1,10 @@
 //! Integration tests for directory operations.
 
-use voidfs::fs::directory::FileType;
-use voidfs::fs::ops::{
+use darkfs::fs::directory::FileType;
+use darkfs::fs::ops::{
     create_file, delete_file, list_dir, mkdir, read_file_data, rmdir, rmdir_recursive, stat,
 };
-use voidfs::util::errors::VoidError;
+use darkfs::util::errors::DarkError;
 
 use crate::common::create_random_image;
 
@@ -104,7 +104,7 @@ fn delete_nonexistent_file_fails() {
     let secret = [42u8; 32];
 
     let result = delete_file(&mut img, &secret, "/nope.txt");
-    assert!(matches!(result, Err(VoidError::FileNotFound)));
+    assert!(matches!(result, Err(DarkError::FileNotFound)));
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn rmdir_nonempty_fails() {
     create_file(&mut img, &secret, "/stuff/file.txt", b"data").unwrap();
 
     let result = rmdir(&mut img, &secret, "/stuff");
-    assert!(matches!(result, Err(VoidError::DirectoryNotEmpty { .. })));
+    assert!(matches!(result, Err(DarkError::DirectoryNotEmpty { .. })));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn rmdir_root_fails() {
     let secret = [42u8; 32];
 
     let result = rmdir(&mut img, &secret, "/");
-    assert!(matches!(result, Err(VoidError::InvalidOperation { .. })));
+    assert!(matches!(result, Err(DarkError::InvalidOperation { .. })));
 }
 
 #[test]
@@ -147,7 +147,7 @@ fn mkdir_duplicate_fails() {
 
     mkdir(&mut img, &secret, "/mydir").unwrap();
     let result = mkdir(&mut img, &secret, "/mydir");
-    assert!(matches!(result, Err(VoidError::AlreadyExists { .. })));
+    assert!(matches!(result, Err(DarkError::AlreadyExists { .. })));
 }
 
 #[test]

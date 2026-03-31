@@ -14,7 +14,7 @@ type HmacSha256 = Hmac<Sha256>;
 /// popping the previous segment, rejoin with `/`, prepend `/`.
 ///
 /// ```
-/// # use voidfs::crypto::locator::canonical_path;
+/// # use darkfs::crypto::locator::canonical_path;
 /// assert_eq!(canonical_path(""), "/");
 /// assert_eq!(canonical_path("/"), "/");
 /// assert_eq!(canonical_path("foo"), "/foo");

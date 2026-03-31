@@ -14,7 +14,7 @@ use std::path::Path;
 use fs2::FileExt;
 
 use crate::util::constants::BLOCK_SIZE;
-use crate::util::errors::{VoidError, VoidResult};
+use crate::util::errors::{DarkError, DarkResult};
 
 /// Handle to an open void image file for block-level I/O.
 pub struct ImageFile {
@@ -29,12 +29,12 @@ impl ImageFile {
     /// Open an existing image file for reading and writing.
     ///
     /// Returns an error if the file size is not a multiple of [`BLOCK_SIZE`].
-    pub fn open(path: &Path) -> VoidResult<Self> {
+    pub fn open(path: &Path) -> DarkResult<Self> {
         let file = OpenOptions::new().read(true).write(true).open(path)?;
         let size = file.metadata()?.len();
 
         if size == 0 || size % BLOCK_SIZE as u64 != 0 {
-            return Err(VoidError::InvalidImageSize {
+            return Err(DarkError::InvalidImageSize {
                 size,
                 block_size: BLOCK_SIZE,
             });
@@ -42,7 +42,7 @@ impl ImageFile {
 
         // Acquire an exclusive advisory lock to prevent concurrent access.
         // The lock is released automatically when the File is dropped.
-        file.try_lock_exclusive().map_err(|_| VoidError::ImageLocked)?;
+        file.try_lock_exclusive().map_err(|_| DarkError::ImageLocked)?;
 
         Ok(Self {
             file,
@@ -57,9 +57,9 @@ impl ImageFile {
     }
 
     /// Read a single block from the image.
-    pub fn read_block(&mut self, index: u64) -> VoidResult<[u8; BLOCK_SIZE]> {
+    pub fn read_block(&mut self, index: u64) -> DarkResult<[u8; BLOCK_SIZE]> {
         if index >= self.total_blocks {
-            return Err(VoidError::BlockOutOfRange {
+            return Err(DarkError::BlockOutOfRange {
                 index,
                 total: self.total_blocks,
             });
@@ -72,9 +72,9 @@ impl ImageFile {
     }
 
     /// Write a single block to the image.
-    pub fn write_block(&mut self, index: u64, data: &[u8; BLOCK_SIZE]) -> VoidResult<()> {
+    pub fn write_block(&mut self, index: u64, data: &[u8; BLOCK_SIZE]) -> DarkResult<()> {
         if index >= self.total_blocks {
-            return Err(VoidError::BlockOutOfRange {
+            return Err(DarkError::BlockOutOfRange {
                 index,
                 total: self.total_blocks,
             });
@@ -129,7 +129,7 @@ mod tests {
         let tmp = NamedTempFile::new().unwrap();
         tmp.as_file().set_len(4097).unwrap();
         let result = ImageFile::open(tmp.path());
-        assert!(matches!(result, Err(VoidError::InvalidImageSize { .. })));
+        assert!(matches!(result, Err(DarkError::InvalidImageSize { .. })));
     }
 
     #[test]
@@ -150,7 +150,7 @@ mod tests {
         let tmp = create_test_image(4);
         let mut img = ImageFile::open(tmp.path()).unwrap();
         let result = img.read_block(4);
-        assert!(matches!(result, Err(VoidError::BlockOutOfRange { .. })));
+        assert!(matches!(result, Err(DarkError::BlockOutOfRange { .. })));
     }
 
     #[test]
@@ -158,7 +158,7 @@ mod tests {
         let tmp = create_test_image(4);
         let mut img = ImageFile::open(tmp.path()).unwrap();
         let result = img.write_block(4, &[0u8; BLOCK_SIZE]);
-        assert!(matches!(result, Err(VoidError::BlockOutOfRange { .. })));
+        assert!(matches!(result, Err(DarkError::BlockOutOfRange { .. })));
     }
 
     #[test]

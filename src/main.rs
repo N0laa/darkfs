@@ -1,15 +1,15 @@
-//! voidfs CLI — a deniable steganographic vault.
+//! darkfs CLI — a deniable steganographic vault.
 //!
 //! Usage:
-//!   voidfs create <vault> <size>     Create a new vault (e.g. "10G", "500M")
-//!   voidfs put <vault> <file> [name] Store a file in the vault
-//!   voidfs get <vault> <name> [dest] Retrieve a file from the vault
-//!   voidfs ls <vault>                List files in the vault
-//!   voidfs rm <vault> <name>         Delete a file from the vault
-//!   voidfs mkdir <vault> <dir>       Create a directory
-//!   voidfs info <vault>              Show vault statistics
-//!   voidfs mount <vault> <dir>       Mount as a FUSE filesystem
-//!   voidfs unmount <dir>             Unmount a FUSE filesystem
+//!   darkfs create <vault> <size>     Create a new vault (e.g. "10G", "500M")
+//!   darkfs put <vault> <file> [name] Store a file in the vault
+//!   darkfs get <vault> <name> [dest] Retrieve a file from the vault
+//!   darkfs ls <vault>                List files in the vault
+//!   darkfs rm <vault> <name>         Delete a file from the vault
+//!   darkfs mkdir <vault> <dir>       Create a directory
+//!   darkfs info <vault>              Show vault statistics
+//!   darkfs mount <vault> <dir>       Mount as a FUSE filesystem
+//!   darkfs unmount <dir>             Unmount a FUSE filesystem
 
 use std::fs;
 use std::io::Write as IoWrite;
@@ -19,19 +19,19 @@ use clap::{Parser, Subcommand};
 use rand::RngCore;
 use zeroize::Zeroizing;
 
-use voidfs::crypto::kdf::{derive_master_secret, derive_session_secret, KdfPreset};
-use voidfs::fs::file::read_file;
-use voidfs::fs::ops::{create_file, delete_file, list_dir, mkdir, stat};
-use voidfs::store::image::ImageFile;
-use voidfs::store::superblock::{read_superblock, write_superblock, Superblock};
-use voidfs::util::constants::BLOCK_SIZE;
+use darkfs::crypto::kdf::{derive_master_secret, derive_session_secret, KdfPreset};
+use darkfs::fs::file::read_file;
+use darkfs::fs::ops::{create_file, delete_file, list_dir, mkdir, stat};
+use darkfs::store::image::ImageFile;
+use darkfs::store::superblock::{read_superblock, write_superblock, Superblock};
+use darkfs::util::constants::BLOCK_SIZE;
 
 #[derive(Parser)]
 #[command(
-    name = "voidfs",
+    name = "darkfs",
     about = "A deniable steganographic vault. Nothing to see here.",
     version,
-    after_help = "Examples:\n  voidfs create my.vault 1G\n  voidfs put my.vault secret.pdf\n  voidfs get my.vault secret.pdf .\n  voidfs ls my.vault"
+    after_help = "Examples:\n  darkfs create my.vault 1G\n  darkfs put my.vault secret.pdf\n  darkfs get my.vault secret.pdf .\n  darkfs ls my.vault"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -134,7 +134,7 @@ enum Command {
 // ---------------------------------------------------------------------------
 
 fn get_preset() -> KdfPreset {
-    if std::env::var("VOIDFS_DEV").is_ok() {
+    if std::env::var("DARKFS_DEV").is_ok() {
         KdfPreset::Dev
     } else {
         KdfPreset::Prod
@@ -142,8 +142,8 @@ fn get_preset() -> KdfPreset {
 }
 
 fn prompt_passphrase() -> Zeroizing<String> {
-    if let Ok(pass) = std::env::var("VOIDFS_PASSPHRASE") {
-        std::env::remove_var("VOIDFS_PASSPHRASE");
+    if let Ok(pass) = std::env::var("DARKFS_PASSPHRASE") {
+        std::env::remove_var("DARKFS_PASSPHRASE");
         return Zeroizing::new(pass);
     }
     Zeroizing::new(
@@ -288,11 +288,11 @@ fn cmd_put(vault: &Path, input: &Path, name_override: Option<&str>) {
     let (mut img, master, session, mut sb) = open_vault(vault);
 
     // Populate collision tracking
-    voidfs::fs::ops::populate_claims(&mut img, &session).ok();
+    darkfs::fs::ops::populate_claims(&mut img, &session).ok();
 
     create_file(&mut img, &session, &vpath, &data)
         .unwrap_or_else(|e| match e {
-            voidfs::util::errors::VoidError::NoSlotAvailable { .. } => {
+            darkfs::util::errors::DarkError::NoSlotAvailable { .. } => {
                 die("Vault is full. Create a larger vault to store more files.");
             }
             _ => die(&format!("Write failed: {e}")),
@@ -356,11 +356,11 @@ fn cmd_ls(vault: &Path, dir: Option<&str>) {
 
     for entry in &idx.entries {
         let suffix = match entry.entry_type {
-            voidfs::fs::directory::FileType::Directory => "/",
-            voidfs::fs::directory::FileType::File => "",
+            darkfs::fs::directory::FileType::Directory => "/",
+            darkfs::fs::directory::FileType::File => "",
         };
 
-        if entry.entry_type == voidfs::fs::directory::FileType::File {
+        if entry.entry_type == darkfs::fs::directory::FileType::File {
             let full = if vpath == "/" {
                 format!("/{}", entry.name)
             } else {
@@ -381,7 +381,7 @@ fn cmd_rm(vault: &Path, name: &str) {
 
     let (mut img, master, session, mut sb) = open_vault(vault);
 
-    voidfs::fs::ops::populate_claims(&mut img, &session).ok();
+    darkfs::fs::ops::populate_claims(&mut img, &session).ok();
 
     delete_file(&mut img, &session, &vpath)
         .unwrap_or_else(|e| die(&format!("Delete failed: {e}")));
@@ -398,7 +398,7 @@ fn cmd_mkdir(vault: &Path, name: &str) {
 
     let (mut img, master, session, mut sb) = open_vault(vault);
 
-    voidfs::fs::ops::populate_claims(&mut img, &session).ok();
+    darkfs::fs::ops::populate_claims(&mut img, &session).ok();
 
     mkdir(&mut img, &session, &vpath)
         .unwrap_or_else(|e| die(&format!("mkdir failed: {e}")));
@@ -415,7 +415,7 @@ fn cmd_info(vault: &Path) {
     let total_blocks = img.total_blocks();
     let image_size = total_blocks * BLOCK_SIZE as u64;
 
-    let info = voidfs::fs::ops::fs_info(&mut img, &session)
+    let info = darkfs::fs::ops::fs_info(&mut img, &session)
         .unwrap_or_else(|e| die(&format!("Cannot read vault: {e}")));
 
     println!("Vault: {}", vault.display());
@@ -433,13 +433,13 @@ fn cmd_info(vault: &Path) {
 
     if info.file_count > 0 || info.dir_count > 0 {
         println!();
-        let entries = voidfs::fs::ops::tree(&mut img, &session).unwrap_or_default();
+        let entries = darkfs::fs::ops::tree(&mut img, &session).unwrap_or_default();
         for (path, entry_type, size) in &entries {
             match entry_type {
-                voidfs::fs::directory::FileType::File => {
+                darkfs::fs::directory::FileType::File => {
                     println!("  {path}  ({})", format_size(*size));
                 }
-                voidfs::fs::directory::FileType::Directory => {
+                darkfs::fs::directory::FileType::Directory => {
                     println!("  {path}/");
                 }
             }
@@ -525,10 +525,10 @@ fn main() {
             let uid = unsafe { libc::getuid() };
             let gid = unsafe { libc::getgid() };
             let handler =
-                voidfs::fuse::handler::VoidFsHandler::new(img, *master, *session, sb, uid, gid);
+                darkfs::fuse::handler::DarkFsHandler::new(img, *master, *session, sb, uid, gid);
 
             let options = vec![
-                fuser::MountOption::FSName("voidfs".to_string()),
+                fuser::MountOption::FSName("darkfs".to_string()),
                 fuser::MountOption::AutoUnmount,
             ];
 

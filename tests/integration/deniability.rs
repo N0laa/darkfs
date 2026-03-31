@@ -1,8 +1,8 @@
 //! Integration test: chi-squared test confirms image is indistinguishable from random.
 
-use voidfs::crypto::kdf::{derive_master_secret, KdfPreset};
-use voidfs::fs::file::write_file;
-use voidfs::util::constants::BLOCK_SIZE;
+use darkfs::crypto::kdf::{derive_master_secret, KdfPreset};
+use darkfs::fs::file::write_file;
+use darkfs::util::constants::BLOCK_SIZE;
 
 use crate::common::create_random_image;
 

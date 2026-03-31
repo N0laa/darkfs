@@ -1,11 +1,11 @@
-//! Error types for voidfs.
+//! Error types for darkfs.
 
-/// The primary error type for all voidfs operations.
+/// The primary error type for all darkfs operations.
 ///
 /// Display messages are intentionally redacted to avoid leaking internal state
 /// (file paths, block offsets, image size). Use `Debug` formatting for diagnostics.
 #[derive(Debug, thiserror::Error)]
-pub enum VoidError {
+pub enum DarkError {
     /// An I/O error occurred while reading or writing the image file.
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
@@ -135,5 +135,5 @@ pub enum VoidError {
     },
 }
 
-/// A convenience type alias for Results with [`VoidError`].
-pub type VoidResult<T> = std::result::Result<T, VoidError>;
+/// A convenience type alias for Results with [`DarkError`].
+pub type DarkResult<T> = std::result::Result<T, DarkError>;

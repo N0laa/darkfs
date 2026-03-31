@@ -1,6 +1,6 @@
-//! FUSE trait implementation for voidfs.
+//! FUSE trait implementation for darkfs.
 //!
-//! Maps between FUSE's inode-based interface and voidfs's path-based
+//! Maps between FUSE's inode-based interface and darkfs's path-based
 //! encrypted block store. An in-memory inode table tracks the mapping
 //! from inode numbers to canonical paths.
 
@@ -25,8 +25,8 @@ use crate::util::constants::BLOCK_SIZE;
 const TTL: Duration = Duration::from_secs(1);
 const ROOT_INO: u64 = 1;
 
-/// The voidfs FUSE filesystem handler.
-pub struct VoidFsHandler {
+/// The darkfs FUSE filesystem handler.
+pub struct DarkFsHandler {
     image: ImageFile,
     master_secret: Zeroizing<[u8; 32]>,
     /// Session secret derived from master + per-image random salt.
@@ -57,23 +57,23 @@ struct OpenFile {
     dirty: bool,
 }
 
-/// Map a VoidError to an appropriate libc errno.
-fn to_errno(e: &crate::util::errors::VoidError) -> i32 {
-    use crate::util::errors::VoidError;
+/// Map a DarkError to an appropriate libc errno.
+fn to_errno(e: &crate::util::errors::DarkError) -> i32 {
+    use crate::util::errors::DarkError;
     match e {
-        VoidError::FileNotFound => libc::ENOENT,
-        VoidError::AlreadyExists { .. } => libc::EEXIST,
-        VoidError::DirectoryNotEmpty { .. } => libc::ENOTEMPTY,
-        VoidError::InvalidOperation { .. } => libc::EINVAL,
-        VoidError::NoSlotAvailable { .. } => libc::ENOSPC,
-        VoidError::ReservedName { .. } => libc::EINVAL,
-        VoidError::FileTooLarge { .. } => libc::EFBIG,
-        VoidError::Io(_) => libc::EIO,
+        DarkError::FileNotFound => libc::ENOENT,
+        DarkError::AlreadyExists { .. } => libc::EEXIST,
+        DarkError::DirectoryNotEmpty { .. } => libc::ENOTEMPTY,
+        DarkError::InvalidOperation { .. } => libc::EINVAL,
+        DarkError::NoSlotAvailable { .. } => libc::ENOSPC,
+        DarkError::ReservedName { .. } => libc::EINVAL,
+        DarkError::FileTooLarge { .. } => libc::EFBIG,
+        DarkError::Io(_) => libc::EIO,
         _ => libc::EIO,
     }
 }
 
-impl VoidFsHandler {
+impl DarkFsHandler {
     /// Create a new FUSE handler with pre-derived secrets and superblock.
     pub fn new(
         image: ImageFile,
@@ -204,7 +204,7 @@ impl VoidFsHandler {
     }
 }
 
-impl Filesystem for VoidFsHandler {
+impl Filesystem for DarkFsHandler {
     fn lookup(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let child = match self.child_path(parent, name) {
             Some(p) => p,

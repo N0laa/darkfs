@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::fs::file::{read_file, write_file};
 use crate::fs::path::dirindex_path;
 use crate::store::image::ImageFile;
-use crate::util::errors::{VoidError, VoidResult};
+use crate::util::errors::{DarkError, DarkResult};
 
 /// The type of a directory entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,29 +58,29 @@ impl DirIndex {
     ///
     /// Rejects empty names, names longer than 255 bytes, names containing
     /// null bytes or slashes, and `.`/`..` entries.
-    pub fn validate_name(name: &str) -> VoidResult<()> {
+    pub fn validate_name(name: &str) -> DarkResult<()> {
         if name.is_empty() {
-            return Err(VoidError::InvalidName {
+            return Err(DarkError::InvalidName {
                 reason: "name is empty".to_string(),
             });
         }
         if name.len() > 255 {
-            return Err(VoidError::InvalidName {
+            return Err(DarkError::InvalidName {
                 reason: "name exceeds 255 bytes".to_string(),
             });
         }
         if name.contains('\0') {
-            return Err(VoidError::InvalidName {
+            return Err(DarkError::InvalidName {
                 reason: "name contains null byte".to_string(),
             });
         }
         if name.contains('/') {
-            return Err(VoidError::InvalidName {
+            return Err(DarkError::InvalidName {
                 reason: "name contains slash".to_string(),
             });
         }
         if name == "." || name == ".." {
-            return Err(VoidError::InvalidName {
+            return Err(DarkError::InvalidName {
                 reason: "name is . or ..".to_string(),
             });
         }
@@ -91,7 +91,7 @@ impl DirIndex {
     ///
     /// Validates the name before adding. Rejects names containing null bytes,
     /// slashes, `.`/`..`, empty names, or names exceeding 255 bytes.
-    pub fn add(&mut self, name: String, entry_type: FileType) -> VoidResult<bool> {
+    pub fn add(&mut self, name: String, entry_type: FileType) -> DarkResult<bool> {
         Self::validate_name(&name)?;
         if self.contains(&name) {
             return Ok(false);
@@ -121,7 +121,7 @@ pub fn read_dirindex(
     image: &mut ImageFile,
     master_secret: &[u8; 32],
     dir_path: &str,
-) -> VoidResult<DirIndex> {
+) -> DarkResult<DirIndex> {
     let idx_path = dirindex_path(dir_path);
     match read_file(image, master_secret, &idx_path)? {
         Some(data) => Ok(DirIndex::from_bytes(&*data).unwrap_or_default()),
@@ -135,7 +135,7 @@ pub fn write_dirindex(
     master_secret: &[u8; 32],
     dir_path: &str,
     index: &DirIndex,
-) -> VoidResult<()> {
+) -> DarkResult<()> {
     let idx_path = dirindex_path(dir_path);
     let data = index.to_bytes();
     write_file(image, master_secret, &idx_path, &data)

@@ -1,4 +1,4 @@
-//! mkvoid: create a new void image filled with cryptographically secure random data.
+//! mkdark: create a new void image filled with cryptographically secure random data.
 
 use std::fs::File;
 use std::io::Write;
@@ -7,10 +7,10 @@ use std::path::PathBuf;
 use clap::Parser;
 use rand::RngCore;
 
-use voidfs::util::constants::BLOCK_SIZE;
+use darkfs::util::constants::BLOCK_SIZE;
 
 #[derive(Parser)]
-#[command(name = "mkvoid", about = "Create a new void image")]
+#[command(name = "mkdark", about = "Create a new void image")]
 struct Cli {
     /// Image size (e.g. "64M", "2G", "1048576")
     #[arg(long)]

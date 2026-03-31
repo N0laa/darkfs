@@ -1,9 +1,9 @@
 use rand::RngCore;
 use tempfile::NamedTempFile;
-use voidfs::store::image::ImageFile;
-use voidfs::util::constants::BLOCK_SIZE;
+use darkfs::store::image::ImageFile;
+use darkfs::util::constants::BLOCK_SIZE;
 
-/// Create a temporary image file filled with random data, simulating `mkvoid`.
+/// Create a temporary image file filled with random data, simulating `mkdark`.
 pub fn create_random_image(num_blocks: u64) -> (NamedTempFile, ImageFile) {
     let tmp = NamedTempFile::new().expect("create tempfile");
     let size = num_blocks * BLOCK_SIZE as u64;

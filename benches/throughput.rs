@@ -1,4 +1,4 @@
-//! Throughput benchmarks for voidfs cryptographic primitives and file I/O.
+//! Throughput benchmarks for darkfs cryptographic primitives and file I/O.
 //!
 //! Run with: `cargo bench`
 
@@ -6,13 +6,13 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use rand::RngCore;
 use tempfile::NamedTempFile;
 
-use voidfs::crypto::cipher::{decrypt_block, encrypt_block};
-use voidfs::crypto::kdf::{derive_master_secret, KdfPreset};
-use voidfs::crypto::keys::derive_block_key;
-use voidfs::crypto::locator::{block_offset, canonical_path};
-use voidfs::fs::file::{read_file, write_file};
-use voidfs::store::image::ImageFile;
-use voidfs::util::constants::{BLOCK_SIZE, PAYLOAD_SIZE};
+use darkfs::crypto::cipher::{decrypt_block, encrypt_block};
+use darkfs::crypto::kdf::{derive_master_secret, KdfPreset};
+use darkfs::crypto::keys::derive_block_key;
+use darkfs::crypto::locator::{block_offset, canonical_path};
+use darkfs::fs::file::{read_file, write_file};
+use darkfs::store::image::ImageFile;
+use darkfs::util::constants::{BLOCK_SIZE, PAYLOAD_SIZE};
 
 fn create_random_image(num_blocks: u64) -> (NamedTempFile, ImageFile) {
     let tmp = NamedTempFile::new().expect("create tempfile");

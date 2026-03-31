@@ -1,9 +1,9 @@
 //! Integration test: write file → read file roundtrip with various sizes.
 
 use rand::RngCore;
-use voidfs::crypto::kdf::{derive_master_secret, KdfPreset};
-use voidfs::fs::file::{read_file, write_file};
-use voidfs::util::constants::{BLOCK_SIZE, DATA_IN_BLOCK0, DATA_IN_BLOCKN};
+use darkfs::crypto::kdf::{derive_master_secret, KdfPreset};
+use darkfs::fs::file::{read_file, write_file};
+use darkfs::util::constants::{BLOCK_SIZE, DATA_IN_BLOCK0, DATA_IN_BLOCKN};
 
 use crate::common::create_random_image;
 

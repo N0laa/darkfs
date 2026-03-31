@@ -1,4 +1,4 @@
-//! voidfs — A deniable steganographic filesystem.
+//! darkfs — A deniable steganographic filesystem.
 //!
 //! Nothing to see here.
 

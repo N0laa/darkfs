@@ -11,7 +11,7 @@ use crate::crypto::keys::derive_block_key;
 use crate::crypto::locator::block_offset;
 use crate::store::image::ImageFile;
 use crate::util::constants::{BLOCK_SIZE, MAX_SLOTS, PAYLOAD_SIZE};
-use crate::util::errors::{VoidError, VoidResult};
+use crate::util::errors::{DarkError, DarkResult};
 
 /// Perform a dummy encryption to equalize timing with a successful decryption.
 ///
@@ -39,7 +39,7 @@ pub fn write_slot(
     canonical_path: &str,
     block_num: u64,
     plaintext: &[u8; PAYLOAD_SIZE],
-) -> VoidResult<()> {
+) -> DarkResult<()> {
     let key = derive_block_key(master_secret, canonical_path, block_num)?;
     let encrypted = encrypt_block(&key, plaintext)?;
 
@@ -78,7 +78,7 @@ pub fn write_slot(
         image.claim_offset(offset);
         Ok(())
     } else {
-        Err(VoidError::NoSlotAvailable {
+        Err(DarkError::NoSlotAvailable {
             path: canonical_path.to_string(),
             block_num,
         })
@@ -103,7 +103,7 @@ pub fn write_slot_cow(
     canonical_path: &str,
     block_num: u64,
     plaintext: &[u8; PAYLOAD_SIZE],
-) -> VoidResult<Option<u64>> {
+) -> DarkResult<Option<u64>> {
     let key = derive_block_key(master_secret, canonical_path, block_num)?;
     let encrypted = encrypt_block(&key, plaintext)?;
 
@@ -153,7 +153,7 @@ pub fn write_slot_cow(
             Ok(None)
         }
         // No slot at all
-        (None, None) => Err(VoidError::NoSlotAvailable {
+        (None, None) => Err(DarkError::NoSlotAvailable {
             path: canonical_path.to_string(),
             block_num,
         }),
@@ -172,7 +172,7 @@ pub fn read_slot(
     master_secret: &[u8; 32],
     canonical_path: &str,
     block_num: u64,
-) -> VoidResult<Option<[u8; PAYLOAD_SIZE]>> {
+) -> DarkResult<Option<[u8; PAYLOAD_SIZE]>> {
     let key = derive_block_key(master_secret, canonical_path, block_num)?;
     let total_blocks = image.total_blocks();
     let mut found: Option<[u8; PAYLOAD_SIZE]> = None;
@@ -206,7 +206,7 @@ pub fn read_slot(
 /// Erase a specific block offset by overwriting with random data.
 ///
 /// Used by COW write to clean up old slots after a successful commit.
-pub fn erase_slot_at(image: &mut ImageFile, offset: u64) -> VoidResult<()> {
+pub fn erase_slot_at(image: &mut ImageFile, offset: u64) -> DarkResult<()> {
     let mut random_data = [0u8; BLOCK_SIZE];
     rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut random_data);
     image.write_block(offset, &random_data)?;
@@ -225,7 +225,7 @@ pub fn erase_slot(
     master_secret: &[u8; 32],
     canonical_path: &str,
     block_num: u64,
-) -> VoidResult<bool> {
+) -> DarkResult<bool> {
     let key = derive_block_key(master_secret, canonical_path, block_num)?;
     let total_blocks = image.total_blocks();
     let mut erased = false;
@@ -267,7 +267,7 @@ mod tests {
     fn create_random_image(num_blocks: u64) -> (NamedTempFile, ImageFile) {
         let tmp = NamedTempFile::new().expect("create tempfile");
         let size = num_blocks * BLOCK_SIZE as u64;
-        // Fill with random data (simulating mkvoid)
+        // Fill with random data (simulating mkdark)
         let mut buf = vec![0u8; size as usize];
         rand::thread_rng().fill_bytes(&mut buf);
         std::io::Write::write_all(&mut tmp.as_file(), &buf).unwrap();
@@ -376,7 +376,7 @@ mod tests {
             let payload = [i as u8; PAYLOAD_SIZE];
             match write_slot(&mut img, &secret, &path, 0, &payload) {
                 Ok(()) => successes += 1,
-                Err(VoidError::NoSlotAvailable { .. }) => failures += 1,
+                Err(DarkError::NoSlotAvailable { .. }) => failures += 1,
                 Err(e) => panic!("unexpected error: {}", e),
             }
         }

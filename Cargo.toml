@@ -1,5 +1,5 @@
 [package]
-name = "voidfs"
+name = "darkfs"
 version = "0.1.0"
 edition = "2021"
 description = "A deniable steganographic filesystem. Nothing to see here."
@@ -8,12 +8,12 @@ keywords = ["filesystem", "encryption", "steganography", "deniable", "fuse"]
 categories = ["filesystem", "cryptography"]
 
 [[bin]]
-name = "voidfs"
+name = "darkfs"
 path = "src/main.rs"
 
 [[bin]]
-name = "mkvoid"
-path = "tools/mkvoid.rs"
+name = "mkdark"
+path = "tools/mkdark.rs"
 
 [[bin]]
 name = "stats-verify"
