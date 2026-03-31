@@ -73,6 +73,12 @@ const SLOT_ENTRY_SIZE: usize = 13;
 const MAX_SLOT_ENTRIES: usize =
     (PAYLOAD_SIZE - SB_HEADER_SIZE - INTEGRITY_SIZE - 4) / SLOT_ENTRY_SIZE;
 
+impl Default for Superblock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Superblock {
     /// Create a new superblock with a fresh random salt.
     pub fn new() -> Self {
@@ -383,12 +389,7 @@ pub fn write_superblock(
     // Shard it via QSMM.
     let placements = mesh
         .shard_metadata(&serialized, &qsmm_key, hw_entropy)
-        .map_err(|e| {
-            DarkError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("mesh shard failed: {e}"),
-            ))
-        })?;
+        .map_err(|e| DarkError::Io(std::io::Error::other(format!("mesh shard failed: {e}"))))?;
 
     // Encrypt and write each shard.
     for placement in &placements {

@@ -124,7 +124,7 @@ pub fn read_dirindex(
 ) -> DarkResult<DirIndex> {
     let idx_path = dirindex_path(dir_path);
     match read_file(image, master_secret, &idx_path)? {
-        Some(data) => Ok(DirIndex::from_bytes(&*data).unwrap_or_default()),
+        Some(data) => Ok(DirIndex::from_bytes(&data).unwrap_or_default()),
         None => Ok(DirIndex::default()),
     }
 }

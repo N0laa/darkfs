@@ -3,7 +3,7 @@
 //! The header is exactly [`HEADER_SIZE`] (64) bytes and is placed at the start
 //! of block 0's plaintext. The remaining bytes in block 0 carry file data.
 
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
@@ -91,8 +91,7 @@ impl FileHeader {
     }
 }
 
-// Bring Write trait into scope for cursor.write_all
-use std::io::Write;
+
 
 #[cfg(test)]
 mod tests {

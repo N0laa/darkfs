@@ -327,7 +327,7 @@ fn ciphertext_bytes_show_no_bias_at_magic_positions() {
 
     // Write 100 small files
     for i in 0..100 {
-        write_file(&mut img, &secret, &format!("/b_{i:03}"), &vec![0xBB; 50]).unwrap();
+        write_file(&mut img, &secret, &format!("/b_{i:03}"), &[0xBB; 50]).unwrap();
     }
 
     // Collect ciphertext bytes at positions 0-7 (after nonce prefix) for each file's block 0

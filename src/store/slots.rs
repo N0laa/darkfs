@@ -10,8 +10,9 @@
 //! XOR'd with a keyed CSPRNG stream so that every byte on disk is
 //! indistinguishable from random noise.
 
-use crate::crypto::cipher::{decrypt_block_masked, encrypt_block_masked};
 use zeroize::Zeroize;
+
+use crate::crypto::cipher::{decrypt_block_masked, encrypt_block_masked};
 use crate::crypto::keys::derive_block_key;
 use crate::crypto::locator::block_offset;
 use crate::store::image::ImageFile;

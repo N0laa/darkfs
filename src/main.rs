@@ -182,7 +182,7 @@ fn parse_size(s: &str) -> Result<u64, String> {
         return Err("size must be > 0".into());
     }
     // Round up to block boundary
-    let total = ((total + BLOCK_SIZE as u64 - 1) / BLOCK_SIZE as u64) * BLOCK_SIZE as u64;
+    let total = total.div_ceil(BLOCK_SIZE as u64) * BLOCK_SIZE as u64;
     Ok(total)
 }
 

@@ -27,7 +27,7 @@ fn multiple_small_files_on_small_image() {
     for (path, expected) in &written {
         if let Some(data) = read_file(&mut img, &secret, path).unwrap() {
             assert_eq!(
-                std::str::from_utf8(&*data).unwrap(),
+                std::str::from_utf8(&data).unwrap(),
                 expected,
                 "file {path} has wrong content"
             );
