@@ -11,7 +11,11 @@ pub const TAG_SIZE: usize = 16;
 pub const PAYLOAD_SIZE: usize = BLOCK_SIZE - TAG_SIZE - NONCE_SIZE;
 
 /// Maximum number of slot candidates for cuckoo-style collision resolution.
-pub const MAX_SLOTS: u32 = 5;
+///
+/// Higher values allow more files on the image (higher fill rate) at the cost
+/// of slightly slower writes (more slots to scan). With 16 slots, practical
+/// fill rate is ~50-60% before slot exhaustion becomes likely.
+pub const MAX_SLOTS: u32 = 16;
 
 /// Magic bytes in the file header that confirm successful decryption.
 /// ASCII "VO1DF5" followed by two null bytes.
