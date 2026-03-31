@@ -76,4 +76,4 @@ Security-sensitive changes should include adversarial tests in `tests/pentest.rs
 
 ## License
 
-By contributing, you agree that your contributions will be dual-licensed under MIT OR Apache-2.0.
+By contributing, you agree that your contributions will be licensed under MPL-2.0.

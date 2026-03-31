@@ -3,7 +3,7 @@ name = "darkfs"
 version = "0.1.0"
 edition = "2021"
 description = "A deniable steganographic filesystem. Nothing to see here."
-license = "MIT OR Apache-2.0"
+license = "MPL-2.0"
 keywords = ["filesystem", "encryption", "steganography", "deniable", "fuse"]
 categories = ["filesystem", "cryptography"]
 
