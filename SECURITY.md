@@ -112,7 +112,7 @@ Full automated pentest with 25+ attacks across 7 categories. All findings below 
 | P1 | Stale blocks after size-reducing overwrite — old excess blocks not erased | HIGH | **FIXED** — `write_file` Phase 4 erases blocks `new_count..old_count` |
 | P2 | Superblock serialization panic on >305 slot entries (buffer overflow) | HIGH | **FIXED** — bounds check returns `SuperblockFull` error |
 | P2b | Stale `SUPERBLOCK_MAX_ENTRIES` constant (440 vs actual 305) | HIGH | **FIXED** — updated to 305 |
-| P3 | Snapshot diff reveals superblock location (only block changing every write) | MEDIUM | **FIXED** — 7 deterministic decoy writes per superblock update |
+| P3 | Snapshot diff reveals superblock location (only block changing every write) | MEDIUM | **FIXED** — 7 random decoy writes per superblock update |
 | P4 | Write I/O count reveals exact file size (no write-side padding) | MEDIUM | **FIXED** — dummy writes pad to tier boundaries (1/16/256/4096) |
 | P5 | `create_file("/")` panics via `assert!` in `filename_of` | LOW | **FIXED** — `filename_of` returns `Option`, callers return errors |
 | P6 | Superblock is single point of failure (corrupt 1 block → total data loss) | MEDIUM | Known limitation — inherent to deniable design; documented |

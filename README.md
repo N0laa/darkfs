@@ -6,7 +6,7 @@
 
 ## What is this?
 
-darkfs is a FUSE-based encrypted filesystem where the entire disk image is indistinguishable from random data. No headers, no magic bytes, no metadata, no partition table — nothing reveals whether the image is in use or was simply filled with `/dev/urandom`.
+darkfs is a FUSE-based encrypted filesystem designed so that the entire disk image is statistically indistinguishable from random data. No headers, no magic bytes, no metadata, no partition table — nothing should reveal whether the image is in use or was simply filled with `/dev/urandom`.
 
 The only secret is a passphrase. Everything else — block locations, encryption keys, directory structure — is deterministically derived from it.
 
@@ -16,7 +16,7 @@ The only secret is a passphrase. Everything else — block locations, encryption
 
 Existing tools like VeraCrypt and LUKS protect the *contents* of your data, but they announce its *existence* — headers, partition tables, magic bytes. An adversary doesn't need to break the crypto if they can simply prove you're hiding something.
 
-This project explores whether a filesystem can be built where the storage medium is cryptographically indistinguishable from random noise. Where any passphrase produces a valid (empty) result. Where multiple independent filesystems coexist without any detectable boundary. Where the answer to "is there data here?" is mathematically unanswerable.
+This project explores whether a filesystem can be built where the storage medium appears to be random noise. Where any passphrase produces a valid (empty) result. Where multiple independent filesystems coexist without a detectable boundary. Where "is there data here?" has no provable answer.
 
 The current implementation demonstrates that this is feasible. The [SECURITY.md](SECURITY.md) documents what works, what doesn't, and what remains to be solved.
 

@@ -43,10 +43,16 @@ Argon2id(passphrase, salt=SHA256("darkfs-v1-{image_size}"), m=256MB, t=4)
     v
 master_secret: [u8; 32]    <-- Zeroizing, never written to disk
     |
-    +---> superblock_offset = HMAC-SHA256(master_secret, "darkfs-superblock") % total_blocks
+    +---> shard_positions = QSMM mesh (HMAC-SHA256 derived, 9 positions)
+    |         --> where the 5-of-9 superblock shards live on disk
     |
     +---> superblock_key = HKDF-Expand(master_secret, "darkfs-superblock-key")
-    |         --> decrypts the superblock to recover random_salt
+    |         --> AEAD key for encrypting/decrypting shard blocks
+    |
+    +---> void_mask = QSMM void (ChaCha20 keyed by master_secret)
+    |         --> XOR mask applied to all shard blocks
+    |
+    +---> [shards decrypt + Shamir reconstruct --> superblock --> random_salt]
     |
     +---> session_secret = HKDF-Expand(master_secret, "darkfs-session" || random_salt)
               |
@@ -54,7 +60,10 @@ master_secret: [u8; 32]    <-- Zeroizing, never written to disk
               |         --> disk block offset (where to read/write)
               |
               +---> block_key = HKDF-Expand(session_secret, "darkfs-block-key" || ... || epoch)
-                        --> 32-byte XChaCha20 key (per block)
+              |         --> 32-byte XChaCha20 key (per block)
+              |
+              +---> void_mask = QSMM void (ChaCha20 keyed by session_secret)
+                        --> XOR mask applied to all file blocks
 ```
 
 ### Dual-Secret Architecture
@@ -66,7 +75,7 @@ This ensures two same-sized images with the same passphrase produce different fi
 
 ### Why deterministic salt?
 
-Storing a random per-image salt on disk would break deniability -- it would be detectable metadata. Instead, the Argon2id salt is derived from the image size, which the user already knows. The per-image random salt is stored inside the encrypted superblock, which is itself indistinguishable from random data.
+Storing a random per-image salt on disk would break deniability -- it would be detectable metadata. Instead, the Argon2id salt is derived from the image size, which the user already knows. The per-image random salt is stored inside the encrypted superblock, which is itself designed to be indistinguishable from random data.
 
 ### Why XChaCha20 instead of ChaCha20?
 
@@ -74,14 +83,19 @@ XChaCha20 has a 24-byte (192-bit) nonce with birthday bound at ~2^96. Since nonc
 
 ## Block Layout
 
-Every block on disk is exactly 4096 bytes:
+Every block on disk is exactly 4096 bytes and passes through two encryption layers:
 
 ```
-[24-byte random nonce | ciphertext | 16-byte Poly1305 auth tag]
-|<----------------------- 4096 bytes ----------------------->|
+Layer 1 (AEAD):  plaintext --> XChaCha20-Poly1305 --> [nonce | ciphertext | tag]
+Layer 2 (Void):  [nonce | ciphertext | tag] XOR ChaCha20(mask_key, block_id)
+                                                    |
+                                                    v
+                              On disk: 4096 bytes of noise (no visible structure)
 ```
 
-The plaintext payload is 4056 bytes (4096 - 24 - 16).
+After void masking, the nonce, ciphertext, and auth tag are all XOR'd with a keyed CSPRNG stream. Nothing on disk reveals the AEAD structure — no nonce at a known offset, no tag at the end.
+
+The plaintext payload before AEAD is 4056 bytes (4096 - 24 nonce - 16 tag).
 
 For file block 0, the plaintext payload contains:
 
@@ -106,20 +120,36 @@ Offset  Size  Field
 52      12    padding (zeros)
 ```
 
-## Superblock
+## Superblock (Shattered Metadata Mesh)
 
-Each passphrase has an encrypted superblock at an HMAC-derived offset. It stores:
+There is no single superblock block. Instead, superblock metadata is split into **9 shards** (requiring **5 to reconstruct**) via QSMM's Shamir Secret Sharing mesh. Each shard is:
+
+1. Serialized with an HMAC integrity tag
+2. AEAD-encrypted with `superblock_key` (derived from `master_secret`)
+3. Void-masked with a ChaCha20 stream (keyed by `master_secret`)
+4. Written to a disk position determined by `HMAC-SHA256(master_secret, shard_index)`
+
+The superblock payload stores:
 
 - **random_salt** (32 bytes): per-image nonce for session key derivation.
 - **generation** (u64): monotonic counter for replay detection.
 - **file_count** (u32): tracked files.
 - **slot_map**: maps path hashes to slot indices for O(1) block lookups (max 305 entries).
+- **HMAC integrity tag** (32 bytes): constant-time verified via `subtle::ConstantTimeEq`.
 
-The superblock is encrypted with a key derived from `master_secret` (not `session_secret`), since it must be readable before the session secret can be derived.
+On mount, darkfs computes the 9 shard positions, reads and decrypts each, and reconstructs the superblock from any 5+ valid shards. If fewer than 5 decrypt (wrong passphrase, fresh image, or random noise), it returns an empty filesystem — no error.
 
-### Decoy Writes
+### Fault tolerance
 
-Each superblock write is accompanied by 7 deterministic decoy writes at HMAC-derived offsets. This prevents an adversary with periodic snapshots from identifying the superblock by observing which block changes on every operation.
+Up to 4 of 9 shards can be corrupted or lost without data loss. This is verified in the pentest suite.
+
+### Decoy writes
+
+Each superblock write is accompanied by 7 decoy writes at **random** positions (not HMAC-derived). This adds noise to multi-snapshot analysis but does not fully prevent shard identification over many snapshots — the 9 shard positions are static for a given passphrase. See [SECURITY.md](SECURITY.md) DA-7 for analysis.
+
+### Minimum image size
+
+Images must have at least 25 blocks (9 for shards + 16 for file data). Smaller images are rejected at mount/write time.
 
 ## Collision Resolution
 
@@ -190,7 +220,7 @@ The FUSE handler (`fuse/handler.rs`) bridges between FUSE's inode-based API and 
 ## Attack Surface Analysis
 
 ### What an attacker sees (image at rest)
-- A blob of data indistinguishable from `/dev/urandom` output
+- A blob of data that, in internal testing, is statistically indistinguishable from `/dev/urandom` output (not externally verified)
 - Image size is a multiple of 4096 (common for disk images)
 - No headers, no magic bytes, no partition table, no filesystem signatures
 
@@ -213,16 +243,21 @@ The FUSE handler (`fuse/handler.rs`) bridges between FUSE's inode-based API and 
 
 | Fix | Description |
 |-----|-------------|
+| Double-layer encryption | XChaCha20-Poly1305 AEAD + ChaCha20 void mask on every block |
 | Random nonces per write | Fresh 24-byte nonce on every block write — no nonce reuse even on overwrite |
 | Constant-time slot iteration | All 16 slots checked on every read/write/erase to prevent timing leaks |
-| Timing equalization | Dummy encrypt on decrypt failure to equalize crypto work |
+| Timing equalization | ChaCha20 keystream on decrypt failure to match success-path timing profile |
+| Constant-time HMAC verification | Superblock integrity uses `subtle::ConstantTimeEq` |
 | COW multi-block writes | Crash-safe: data blocks written first, block 0 commits last |
 | Stale block erasure | Overwriting with smaller file erases old excess blocks |
 | Write-side I/O padding | Dummy writes pad to tier boundaries (matching read padding) |
-| Superblock decoy writes | 7 deterministic decoy blocks written with each superblock update |
+| Superblock sharding | 5-of-9 Shamir threshold — no single point of failure |
+| Superblock void masking | Shard blocks are void-masked like file blocks |
+| Superblock decoy writes | 7 random decoy blocks written with each superblock update |
 | Superblock overflow protection | Bounds check prevents panic on oversized slot map |
+| Minimum image size | Rejects images with fewer than 25 blocks |
 | Passphrase zeroization | `Zeroizing<String>` wrapper on passphrase input |
-| Plaintext zeroization | All intermediate plaintext buffers zeroized on drop |
+| Plaintext zeroization | All intermediate plaintext and timing-dummy buffers zeroized on drop |
 | Length-prefixed HMAC input | Path length prefix prevents concatenation ambiguity |
 | Advisory file locking | `flock` exclusive lock prevents concurrent image access |
 | Path validation | Reject null bytes, slashes, `.`/`..`, and reserved names in directory entries |
