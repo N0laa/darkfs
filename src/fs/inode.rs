@@ -91,8 +91,6 @@ impl FileHeader {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;

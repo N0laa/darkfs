@@ -1,22 +1,24 @@
 # darkfs
 
-**A deniable steganographic filesystem. Nothing to see here.**
+**A research project exploring deniable steganographic storage.**
+
+> **This is a research prototype, not a production tool.** It has not been externally audited. Do not rely on it as your sole protection for sensitive data. The cryptographic properties described here are design goals being tested — not guarantees.
+
+## What is this?
 
 darkfs is a FUSE-based encrypted filesystem where the entire disk image is indistinguishable from random data. No headers, no magic bytes, no metadata, no partition table — nothing reveals whether the image is in use or was simply filled with `/dev/urandom`.
 
-The only secret is a passphrase in your head. Everything else — block locations, encryption keys, directory structure — is deterministically derived from that passphrase.
+The only secret is a passphrase. Everything else — block locations, encryption keys, directory structure — is deterministically derived from it.
 
-> **Warning**: This is experimental cryptographic software that has not been externally audited. It has undergone multiple internal security audits (see [SECURITY.md](SECURITY.md)) with all findings fixed, but should not be your only protection for life-critical data. Use alongside established tools, not as a replacement.
+## Research question
 
-## Why darkfs?
+**Can software be truly invisible?** Not just encrypted, but indistinguishable from nothing.
 
-Most encryption tools protect your data. darkfs goes further — it hides the fact that data exists at all.
+Existing tools like VeraCrypt and LUKS protect the *contents* of your data, but they announce its *existence* — headers, partition tables, magic bytes. An adversary doesn't need to break the crypto if they can simply prove you're hiding something.
 
-This project started as a research question: **can software be truly invisible?** Not just encrypted, but indistinguishable from nothing. A file that looks like random noise. A filesystem that can't be proven to exist. A passphrase that can't be proven wrong.
+This project explores whether a filesystem can be built where the storage medium is cryptographically indistinguishable from random noise. Where any passphrase produces a valid (empty) result. Where multiple independent filesystems coexist without any detectable boundary. Where the answer to "is there data here?" is mathematically unanswerable.
 
-Existing tools like VeraCrypt and LUKS do encryption well, but they leave fingerprints — headers, partition tables, magic bytes. An adversary doesn't need to break the crypto if they can simply prove you're hiding something. In a world where big tech and surveillance systems grow more capable every year, the ability to say "there's nothing here" — and have that be mathematically unfalsifiable — matters.
-
-darkfs is for anyone who thinks that should be possible. Journalists, activists, researchers, or anyone who believes privacy isn't just about locking the door — it's about making the door disappear.
+The current implementation demonstrates that this is feasible. The [SECURITY.md](SECURITY.md) documents what works, what doesn't, and what remains to be solved.
 
 ## How It Works
 
@@ -36,12 +38,12 @@ passphrase ──► Argon2id ──► master_secret
                └──────────────────────────────────┘
 ```
 
-Every block on disk: `XChaCha20-Poly1305(data) XOR ChaCha20(mask)` — two independent encryption layers. The entire image passes all statistical randomness tests.
+Every block on disk: `XChaCha20-Poly1305(data) XOR ChaCha20(mask)` — two independent encryption layers. In internal testing, the image passes statistical randomness tests (chi-squared, entropy, serial correlation). See [SECURITY.md](SECURITY.md) for details and caveats.
 
 ## Key Properties
 
-- **Deniable**: The image passes statistical randomness tests. There is no way to prove it contains a filesystem.
-- **Multi-passphrase**: Multiple independent filesystems can coexist on the same image. Each passphrase reveals a different filesystem. Nobody can prove a second passphrase exists.
+- **Deniable**: A static image passes statistical randomness tests in internal testing. Multi-snapshot analysis reveals write patterns (see Threat Model).
+- **Multi-passphrase**: Multiple independent filesystems can coexist on the same image. Each passphrase reveals a different filesystem. Under the single-snapshot threat model, an adversary cannot determine how many passphrases exist.
 - **Wrong passphrase = empty filesystem**: Any passphrase "works" -- most just show an empty directory. No "wrong passphrase" error is ever returned.
 - **Modern crypto**: XChaCha20-Poly1305, Argon2id, HKDF-SHA256, HMAC-SHA256.
 - **Memory safe**: Written in Rust with `#![deny(unsafe_code)]`.
@@ -143,8 +145,8 @@ darkfs put vault.img classified.pdf
 
 # If compelled to reveal a passphrase, give "vacation2024".
 # The adversary sees beach photos and recipes.
-# They cannot prove another passphrase exists.
-# They cannot prove the vault contains anything else.
+# Under single-snapshot analysis, the adversary cannot determine
+# if another passphrase exists.
 ```
 
 ## How passphrases work
@@ -164,34 +166,21 @@ This means:
 
 > **The golden rule: remember your passphrase.** There is no reset. There is no recovery. There is no proof it ever existed. That's the point.
 
-## Best Use Cases
+## Example scenarios
 
-**USB stick.** Create a vault on a flash drive. If the drive is lost, seized, or inspected, it looks like a corrupted or wiped drive — random data with no filesystem signature. Border agents, thieves, or forensic tools find nothing.
+These illustrate the deniability properties being explored, not endorsements for specific use:
 
-```bash
-# Create a vault on a USB stick (replace with your device path)
-darkfs create /Volumes/USBSTICK/random.bin 8G
-
-# Store files
-darkfs put /Volumes/USBSTICK/random.bin documents.zip
-
-# On any other machine with darkfs installed
-darkfs get /Volumes/USBSTICK/random.bin documents.zip .
-```
-
-**Portable file on cloud storage.** Upload `vault.img` to Dropbox, Google Drive, or any cloud service. It's just a blob of random bytes. The cloud provider can't identify it. Download it anywhere, enter your passphrase, get your files.
-
-**Alongside real data.** Keep `random.bin` next to normal files on the same drive. It looks like a disk image, a swap file, or leftover data. Nobody can prove otherwise.
-
-**Decoy under compulsion.** If forced to reveal a passphrase, give the decoy. The adversary sees harmless files. They have no way to determine if another passphrase exists — technically or mathematically.
+- **Portable media.** A vault on a USB stick looks like a corrupted or wiped drive — random data with no filesystem signature. Forensic tools find nothing to analyze.
+- **Cloud storage.** A vault file uploaded to any cloud service is just a blob of random bytes. The provider cannot identify its purpose.
+- **Multi-passphrase.** The same image can hold independent filesystems under different passphrases. Under the single-snapshot threat model, there is no detectable boundary between them.
 
 ## Threat Model
 
 ### What darkfs protects against
 
-- **Disk seizure**: An attacker with the image file cannot determine if it contains data or is random noise.
-- **Compelled disclosure**: You can reveal a decoy passphrase. The attacker cannot prove another passphrase exists.
-- **Forensic analysis**: No headers, magic bytes, partition tables, or statistical anomalies.
+- **Single-snapshot disk seizure**: In internal testing, an attacker with a single copy of the image file cannot distinguish it from random noise using standard statistical tests.
+- **Compelled disclosure**: A decoy passphrase reveals a decoy filesystem. Under the single-snapshot model, the attacker cannot determine if other passphrases exist.
+- **Forensic analysis**: No headers, magic bytes, or partition tables. Internal statistical testing shows no anomalies, but this has not been verified by an external auditor.
 
 ### What darkfs does NOT protect against
 
@@ -221,17 +210,17 @@ Benchmarks on Apple M-series (release build):
 | File write (64 KB) | ~115 MiB/s |
 | File read (64 KB) | ~152 MiB/s |
 
-## Comparison with Existing Tools
+## Related work
 
-| Feature | darkfs | VeraCrypt Hidden Volume | StegFS | Artifice |
+| Approach | darkfs | VeraCrypt Hidden Volume | StegFS | Artifice |
 |---------|--------|------------------------|--------|----------|
-| IS the filesystem | Yes | No (hides inside another) | No (hides in free space) | No (hides in free space) |
+| Deniability model | Image IS noise | Hides inside another volume | Hides in free space | Hides in free space |
 | Multiple passphrases | Unlimited | 2 (outer + hidden) | Limited | Limited |
-| No detectable structure | Yes | Header exists | Requires cover FS | Requires cover FS |
-| Modern crypto | XChaCha20/Argon2id | AES/PBKDF2 | Varies | AES |
+| Detectable structure | None | Header exists | Requires cover FS | Requires cover FS |
+| Crypto | XChaCha20/Argon2id | AES/PBKDF2 | Varies | AES |
 | Language | Rust | C/C++ | C | C |
 
-## Limitations
+## Known limitations
 
 - **Rename is O(file_size)**: Block locations are derived from file paths, so renaming requires re-encrypting all blocks. Currently not implemented (returns ENOSYS).
 - **No journaling**: A crash during write can leave files in an inconsistent state. Block 0 is written last as a basic commit marker.

@@ -387,7 +387,9 @@ fn claim_file_blocks(
         for slot in 0..MAX_SLOTS {
             let offset = block_offset(master_secret, canonical, block_num, slot, total_blocks);
             let raw = image.read_block(offset)?;
-            if crate::crypto::cipher::decrypt_block_masked(&key, &raw, master_secret, offset).is_ok() {
+            if crate::crypto::cipher::decrypt_block_masked(&key, &raw, master_secret, offset)
+                .is_ok()
+            {
                 image.claim_offset(offset);
                 break;
             }

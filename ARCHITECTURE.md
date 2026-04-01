@@ -2,7 +2,7 @@
 
 ## Design Principle
 
-**The only secret is a passphrase in the user's head.** Everything else -- block locations, encryption keys, directory structure -- is deterministically derived from that passphrase. The image file is indistinguishable from random data.
+**The only secret is a passphrase in the user's head.** Everything else -- block locations, encryption keys, directory structure -- is deterministically derived from that passphrase. The design goal is that a static image is indistinguishable from random data; see [SECURITY.md](SECURITY.md) for what has been verified and what limitations remain.
 
 ## Layer Diagram
 
@@ -200,10 +200,10 @@ The FUSE handler (`fuse/handler.rs`) bridges between FUSE's inode-based API and 
 - Observe that the binary is named "darkfs" (if found on the system)
 
 ### What an attacker can learn from multiple snapshots
-- Which blocks changed between snapshots — but 8+ blocks change per operation (decoy writes), so the superblock cannot be identified
+- Which blocks changed between snapshots — decoy writes increase the noise, but shard positions are static and identifiable over many snapshots (see SECURITY.md DA-7)
 - Approximate file sizes within tier boundaries (1/16/256/4096 blocks)
 
-### What an attacker CANNOT learn
+### What an attacker SHOULD NOT be able to learn (single-snapshot model)
 - Whether the image contains any encrypted data at all
 - How many filesystems exist on the image
 - File names, directory structure, or file contents

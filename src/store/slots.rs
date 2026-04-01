@@ -37,11 +37,8 @@ fn timing_equalize(key: &[u8; 32], dummy: &mut [u8; PAYLOAD_SIZE]) {
     // This runs exactly the ChaCha20 computation that was skipped when
     // AEAD verification failed (no Poly1305 involved).
     let mask_key = qsmm::types::SecretKey::from_bytes(*key);
-    let stream = qsmm::void::entropy::generate_mask_stream(
-        &mask_key,
-        qsmm::types::BlockId(0),
-        PAYLOAD_SIZE,
-    );
+    let stream =
+        qsmm::void::entropy::generate_mask_stream(&mask_key, qsmm::types::BlockId(0), PAYLOAD_SIZE);
     // XOR into dummy to prevent optimizer from eliding the computation.
     for (d, s) in dummy.iter_mut().zip(stream.iter()) {
         *d ^= s;
